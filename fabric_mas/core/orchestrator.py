@@ -361,9 +361,16 @@ class Orchestrator:
             agent_py = child / "agent.py"
             if not agent_py.exists():
                 continue
-            module_name = f"fabric_mas.agents.{child.name.replace('-', '_')}.agent"
+            # Use spec_from_file_location so hyphenated folder names work
+            safe_module = f"fabric_mas.agents.{child.name.replace('-', '_')}.agent"
             try:
-                module = importlib.import_module(module_name)
+                import importlib.util
+                spec = importlib.util.spec_from_file_location(safe_module, str(agent_py))
+                if spec is None or spec.loader is None:
+                    logger.warning("Cannot create spec for %s", agent_py)
+                    continue
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
                     if (
@@ -374,7 +381,7 @@ class Orchestrator:
                     ):
                         self.registry.register(attr)
             except Exception as exc:
-                logger.warning("Failed to import %s: %s", module_name, exc)
+                logger.warning("Failed to import %s: %s", safe_module, exc)
 
         logger.info(
             "Auto-registered %d agents: %s",

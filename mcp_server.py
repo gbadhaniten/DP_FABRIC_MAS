@@ -36,7 +36,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP(
     "Fabric-MAS",
-    description=(
+    instructions=(
         "Multi-Agent System for managing Microsoft Fabric resources via natural language. "
         "49 dedicated agents — one per Fabric item type + data modeling — orchestrated "
         "by a Master Brain. Powered by GitHub Copilot (no OpenAI API key needed). "
