@@ -57,9 +57,14 @@ def _get_orchestrator():
 
     from fabric_mas.core.orchestrator import Orchestrator
     from fabric_mas.core.cli_wrapper import FabricCLI
+    from fabric_mas.core.fabric_rest_client import FabricRestClient
     from fabric_mas.tools.search_tool import SearchTool
 
     cli = FabricCLI(
+        default_workspace_id=os.getenv("FABRIC_WORKSPACE_ID"),
+        dry_run=os.getenv("FABRIC_DRY_RUN", "false").lower() == "true",
+    )
+    rest_client = FabricRestClient(
         default_workspace_id=os.getenv("FABRIC_WORKSPACE_ID"),
         dry_run=os.getenv("FABRIC_DRY_RUN", "false").lower() == "true",
     )
@@ -68,6 +73,7 @@ def _get_orchestrator():
     orch = Orchestrator(
         workspace_id=os.getenv("FABRIC_WORKSPACE_ID"),
         cli=cli,
+        rest_client=rest_client,
         search=search,
     )
     orch.auto_register()

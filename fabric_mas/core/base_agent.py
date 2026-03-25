@@ -205,11 +205,13 @@ class BaseAgent(ABC):
         workspace_id: Optional[str] = None,
         *,
         cli: Optional[FabricCLI] = None,
+        rest_client: Optional[Any] = None,
         search: Optional[SearchTool] = None,
         autotrain: bool = True,
     ):
         self.workspace_id = workspace_id
         self.cli = cli or FabricCLI()
+        self.rest_client = rest_client  # FabricRestClient (preferred over CLI)
         self.search = search or SearchTool()
         self.autotrain = autotrain
         self._api_cache: Dict[str, Any] = {}
@@ -277,6 +279,104 @@ class BaseAgent(ABC):
             else:
                 parts.extend([flag, f'"{value}"'])
         return " ".join(parts)
+
+    def _resolve_workspace(self, workspace_id: Optional[str] = None) -> Optional[str]:
+        """Resolve workspace name/ID to a GUID using the REST client."""
+        ws = workspace_id or self.workspace_id
+        if ws and self.rest_client:
+            resolved = self.rest_client.resolve_workspace_id(ws)
+            if resolved:
+                return resolved
+        return ws
+
+    def _run_rest(
+        self,
+        operation: str,
+        params: Dict[str, Any],
+    ) -> Optional[AgentResult]:
+        """
+        Execute an operation via REST API instead of CLI.
+        Returns None if REST client is not available (falls back to CLI).
+        """
+        if not self.rest_client:
+            return None
+
+        ws = self._resolve_workspace(params.get("workspace_id"))
+        if not ws:
+            return AgentResult(
+                success=False,
+                operation=OperationType.CREATE,
+                agent_name=self.__class__.__name__,
+                item_type=self.ITEM_TYPE,
+                message="No workspace ID provided or resolved",
+                errors=["workspace_id is required"],
+            )
+
+        try:
+            if operation == "create":
+                result = self.rest_client.create_item(
+                    workspace_id=ws,
+                    item_type=self.ITEM_TYPE,
+                    display_name=params.get("display_name", "Untitled"),
+                    description=params.get("description", ""),
+                )
+            elif operation == "delete":
+                item_id = params.get("item_id", "")
+                if not item_id:
+                    return AgentResult(
+                        success=False, operation=OperationType.DELETE,
+                        agent_name=self.__class__.__name__,
+                        item_type=self.ITEM_TYPE,
+                        message="item_id required for delete",
+                        errors=["item_id missing"],
+                    )
+                result = self.rest_client.delete_item(ws, item_id)
+            elif operation in ("analyze", "list"):
+                result = self.rest_client.list_items(ws, self.ITEM_TYPE)
+            elif operation == "update":
+                item_id = params.get("item_id", "")
+                result = self.rest_client.update_item(
+                    ws, item_id,
+                    display_name=params.get("display_name"),
+                    description=params.get("description"),
+                )
+            else:
+                return None  # Unsupported operation, fall back to CLI
+
+            op_type = {
+                "create": OperationType.CREATE,
+                "delete": OperationType.DELETE,
+                "update": OperationType.UPDATE,
+                "analyze": OperationType.ANALYZE,
+                "list": OperationType.ANALYZE,
+            }.get(operation, OperationType.CREATE)
+
+            if result.success:
+                import json as _json
+                data_str = _json.dumps(result.data, indent=2, default=str) if result.data else ""
+                return AgentResult(
+                    success=True,
+                    operation=op_type,
+                    agent_name=self.__class__.__name__,
+                    item_type=self.ITEM_TYPE,
+                    message=f"{operation.title()} {self.ITEM_TYPE} succeeded",
+                    data=result.data,
+                    cli_command=f"REST API: {operation} {self.ITEM_TYPE}",
+                    cli_output=data_str,
+                )
+            else:
+                return AgentResult(
+                    success=False,
+                    operation=op_type,
+                    agent_name=self.__class__.__name__,
+                    item_type=self.ITEM_TYPE,
+                    message=f"{operation.title()} {self.ITEM_TYPE} failed: {result.error}",
+                    errors=[result.error],
+                    cli_command=f"REST API: {operation} {self.ITEM_TYPE}",
+                )
+        except Exception as exc:
+            logger.error("REST API error: %s", exc)
+            return None  # Fall back to CLI
 
     def _run(self, command: str) -> AgentResult:
         """Execute a fab command and wrap the output in an AgentResult."""

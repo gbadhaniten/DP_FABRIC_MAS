@@ -29,6 +29,18 @@ class LakehouseAgent(BaseAgent):
     def create(self, params: Dict[str, Any]) -> AgentResult:
         """Create a new Lakehouse in the workspace."""
         self._autotrain("create")
+
+        # Try REST API first (uses VS Code Azure auth — no separate login)
+        rest_result = self._run_rest("create", params)
+        if rest_result is not None:
+            if rest_result.success:
+                rest_result.message = (
+                    f"Lakehouse '{params.get('display_name', '')}' created "
+                    f"in workspace {params.get('workspace_id', self.workspace_id)}"
+                )
+            return rest_result
+
+        # Fallback to CLI
         display_name = params.get("display_name", "Untitled_Lakehouse")
         description = params.get("description", "")
         ws = params.get("workspace_id", self.workspace_id)

@@ -11,3 +11,19 @@
 
 # Execution Log (Auto-Appended Below)
 
+
+### 2026-03-25 13:22 UTC — CREATE [❌ Failed]
+**Prompt:** Create a Lakehouse named LH_MAS_TEST in workspace DIG_FAB_MULTIAGENT
+
+**Result:** 'fab' is not recognized as an internal or external command,
+operable program or batch file.
+
+---
+
+### 2026-03-25 13:49 UTC — CREATE [❌ Failed]
+**Prompt:** Create a Lakehouse called LH_MAS_TEST in workspace WKS-DP-DATA-AGENTS-01
+
+**Result:** 'fab' is not recognized as an internal or external command,
+operable program or batch file.
+
+---

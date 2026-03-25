@@ -252,11 +252,25 @@ def _detect_agents(prompt: str, registry: AgentRegistry) -> List[str]:
     prompt_lower = prompt.lower()
     matched: List[tuple] = []  # (score, agent_key)
 
+    # Words like "workspace" after a preposition are parameters, not targets.
+    # E.g. "Create a Lakehouse in workspace X" → workspace is a parameter.
+    _PARAM_CONTEXT = re.compile(
+        r"\b(?:in|from|to|into|inside|within|under|on|of)\s+(?:the\s+)?$"
+    )
+
     for agent_key, keywords in AGENT_KEYWORDS.items():
         score = 0
         for kw in keywords:
-            if kw in prompt_lower:
-                score += len(kw)  # Longer keyword matches score higher
+            if kw not in prompt_lower:
+                continue
+            # Check if this keyword is preceded by a preposition (parameter context)
+            for m in re.finditer(re.escape(kw), prompt_lower):
+                before = prompt_lower[:m.start()]
+                if _PARAM_CONTEXT.search(before):
+                    # "in workspace X" → parameter, skip this match
+                    pass
+                else:
+                    score += len(kw)
         if score > 0:
             # Verify agent exists in registry
             resolved = registry.get(agent_key)
@@ -333,11 +347,13 @@ class Orchestrator:
         *,
         workspace_id: Optional[str] = None,
         cli: Optional[FabricCLI] = None,
+        rest_client: Any = None,
         search: Optional[SearchTool] = None,
         registry: Optional[AgentRegistry] = None,
     ):
         self.workspace_id = workspace_id
         self.cli = cli or FabricCLI()
+        self.rest_client = rest_client  # FabricRestClient (preferred over CLI)
         self.search = search or SearchTool()
         self.registry = registry or AgentRegistry()
         self._agent_instances: Dict[str, BaseAgent] = {}
@@ -487,6 +503,7 @@ class Orchestrator:
         agent = agent_cls(
             workspace_id=self.workspace_id,
             cli=self.cli,
+            rest_client=self.rest_client,
             search=self.search,
         )
         self._agent_instances[key] = agent
