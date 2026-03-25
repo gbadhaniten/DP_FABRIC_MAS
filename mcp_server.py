@@ -307,9 +307,22 @@ def get_system_status() -> str:
         JSON with system status, agent count, configuration, and environment info.
     """
     orch = _get_orchestrator()
+
+    # Get authenticated account info (dynamic — from session)
+    auth_account = "not yet authenticated"
+    if hasattr(orch, 'rest_client') and orch.rest_client:
+        acct = orch.rest_client.get_authenticated_account()
+        if acct:
+            auth_account = acct
+
     return json.dumps({
         "status": "ready",
         "llm_backend": "github-copilot-via-mcp",
+        "auth": {
+            "method": "azure-identity (session-based, dynamic)",
+            "account": auth_account,
+            "note": "Uses _AZR account for Azure/Fabric access. Opens login prompt if needed.",
+        },
         "agents_registered": len(orch.registry.list_agents()),
         "agent_list": orch.registry.list_agents(),
         "workspace_id": orch.workspace_id or "(not set — pass workspace_id in params)",

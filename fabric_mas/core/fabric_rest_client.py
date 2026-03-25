@@ -1,25 +1,22 @@
 """
 fabric_rest_client.py — Microsoft Fabric REST API Client
 ==========================================================
-Uses Azure Identity with smart credential chain so it shares the same
-authentication as VS Code / Azure extensions. No separate `fab auth login`
-required.
+Fully dynamic authentication — no credentials stored anywhere.
 
-Authentication order:
-    1. Environment variables (AZURE_CLIENT_ID etc.)  — for CI / service principals
-    2. Shared token cache (FABRIC_USERNAME env var)   — cached Azure tokens
-    3. VS Code signed-in Azure account                — requires Azure Resources ext
-    4. Azure CLI (`az login`)                         — if installed
-    5. Interactive browser login (auto-opens prompt)  — last resort, always works
+The client uses Azure Identity to acquire tokens from the user's session:
+    1. Tries cached tokens / VS Code / Azure CLI (whatever is available)
+    2. Decodes the JWT to check which account was used
+    3. If the account is NOT an _AZR account (which has Fabric access),
+       automatically opens a browser login prompt
+    4. Caches the session token — subsequent calls reuse it
 
-Set FABRIC_USERNAME=gbadhani_azr@technipenergies.com to pin a specific account.
+Two types of accounts in the organisation:
+    @ten.com          — corporate account (GitHub, general services)
+    _AZR@domain.com   — Azure resource account (Fabric, Azure resources)
+
+The client ensures Fabric REST calls always use the _AZR account.
 
 Fabric REST API base: https://api.fabric.microsoft.com/v1
-
-This client covers the core CRUD operations that agents need:
-    - Create / Update / Delete items
-    - List items in a workspace
-    - Get item details
 
 Reference: https://learn.microsoft.com/en-us/rest/api/fabric/core/items
 """
@@ -52,19 +49,31 @@ class RestResult:
     elapsed_seconds: float
 
 
+# Marker used to identify Azure accounts that have Fabric resource access.
+# Accounts whose UPN (email) contains this substring are treated as
+# "resource accounts".  This is detected dynamically from the JWT token
+# — no credentials are stored anywhere.
+_AZR_ACCOUNT_MARKER = "_azr"
+
+
 class FabricRestClient:
     """
     REST client for Microsoft Fabric using Azure Identity.
 
-    Authentication uses a smart credential chain (similar to MS Fabric MCP):
-    1. Environment variables (service principal / CI)
-    2. SharedTokenCacheCredential pinned to FABRIC_USERNAME
-    3. VS Code signed-in Azure account
-    4. Azure CLI
-    5. Interactive browser login (opens prompt — always works)
+    Authentication is fully dynamic — no credentials are stored:
 
-    Set env var FABRIC_USERNAME to pin to a specific Azure account,
-    e.g. FABRIC_USERNAME=gbadhani_azr@technipenergies.com
+    1. Acquires a token using the Azure credential chain
+       (token cache → VS Code → Azure CLI → interactive browser)
+    2. Inspects the JWT to check which account was used
+    3. If the account is NOT an _AZR account (no Fabric access),
+       automatically opens a browser login prompt so the user can
+       sign in with their _AZR account
+    4. Caches the session — subsequent calls reuse the token until
+       it expires
+
+    This mirrors how MS Fabric MCP handles auth:
+    - Use the signed-in session if it has the right permissions
+    - Open a login prompt if not
     """
 
     def __init__(
@@ -72,106 +81,152 @@ class FabricRestClient:
         default_workspace_id: Optional[str] = None,
         dry_run: bool = False,
         timeout: int = 60,
-        username: Optional[str] = None,
     ):
         self.default_workspace_id = default_workspace_id
         self.dry_run = dry_run
         self.timeout = timeout
-        self.username = username or os.getenv("FABRIC_USERNAME")
         self._token: Optional[str] = None
         self._token_expires: float = 0
         self._credential = None
+        self._interactive_credential = None  # fallback for re-auth
+        self._authenticated_upn: Optional[str] = None
         self._workspace_name_cache: Dict[str, str] = {}  # name -> id
 
     # ------------------------------------------------------------------
-    # Authentication
+    # JWT helpers (decode token to read identity — no secrets involved)
     # ------------------------------------------------------------------
-    def _get_credential(self):
-        """
-        Build a credential chain that mirrors how MS Fabric MCP authenticates.
-
-        When FABRIC_USERNAME is set (specific account required):
-            1. EnvironmentCredential       — CI / service principals
-            2. SharedTokenCacheCredential   — cached tokens for that user
-            3. InteractiveBrowserCredential — opens browser with login_hint
-            (VS Code credential is SKIPPED because it may use a different account)
-
-        When FABRIC_USERNAME is NOT set (use whatever account is available):
-            1. EnvironmentCredential
-            2. SharedTokenCacheCredential
-            3. VisualStudioCodeCredential   — VS Code Azure sign-in
-            4. AzureCliCredential
-            5. InteractiveBrowserCredential — browser prompt
-        """
-        if self._credential is not None:
-            return self._credential
-
+    @staticmethod
+    def _decode_jwt_claims(token: str) -> Dict[str, Any]:
+        """Decode the payload of a JWT token (no signature verification needed)."""
+        import base64
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        padded = parts[1] + "=" * (-len(parts[1]) % 4)
         try:
-            from azure.identity import (
-                ChainedTokenCredential,
-                EnvironmentCredential,
-                SharedTokenCacheCredential,
-                AzureCliCredential,
-                InteractiveBrowserCredential,
-            )
-        except ImportError:
-            raise ImportError(
-                "azure-identity not installed. Run: pip install azure-identity azure-identity-broker"
-            )
+            return json.loads(base64.urlsafe_b64decode(padded))
+        except Exception:
+            return {}
 
-        credentials = []
+    @staticmethod
+    def _is_azr_account(upn: str) -> bool:
+        """Check whether a UPN belongs to an _AZR (resource) account."""
+        return _AZR_ACCOUNT_MARKER in upn.lower() if upn else False
 
-        # 1. Environment variables (AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID)
-        credentials.append(EnvironmentCredential())
+    # ------------------------------------------------------------------
+    # Authentication — fully dynamic, no stored credentials
+    # ------------------------------------------------------------------
+    def _build_default_chain(self):
+        """
+        Build the default credential chain.
 
-        if self.username:
-            # ── Pinned-account mode ──
-            # Skip VS Code / CLI credentials because they may be signed into a
-            # different account.  Go straight to cached tokens → browser prompt.
-            logger.info("Auth: pinned to account %s", self.username)
-
-            # 2. Shared token cache for that specific user
-            credentials.append(
-                SharedTokenCacheCredential(username=self.username)
-            )
-
-            # 3. Interactive browser with login_hint → pre-fills the email
-            #    After first login the token is cached for subsequent calls.
-            credentials.append(
-                InteractiveBrowserCredential(login_hint=self.username)
-            )
-        else:
-            # ── Auto mode — use whatever Azure identity is available ──
-            credentials.append(SharedTokenCacheCredential())
-
-            try:
-                from azure.identity import VisualStudioCodeCredential
-                credentials.append(VisualStudioCodeCredential())
-            except Exception:
-                pass
-
-            credentials.append(AzureCliCredential())
-            credentials.append(InteractiveBrowserCredential())
-
-        self._credential = ChainedTokenCredential(*credentials)
-        logger.info(
-            "Azure credential chain ready (%d providers, account=%s)",
-            len(credentials),
-            self.username or "auto-detect",
+        Order:
+        1. EnvironmentCredential          — CI / service principals
+        2. SharedTokenCacheCredential      — picks up any cached Azure login
+        3. VisualStudioCodeCredential      — VS Code Azure Resources sign-in
+        4. AzureCliCredential              — az login session
+        5. InteractiveBrowserCredential    — opens browser (last resort)
+        """
+        from azure.identity import (
+            ChainedTokenCredential,
+            EnvironmentCredential,
+            SharedTokenCacheCredential,
+            AzureCliCredential,
+            InteractiveBrowserCredential,
         )
+
+        creds = [
+            EnvironmentCredential(),
+            SharedTokenCacheCredential(),
+        ]
+        try:
+            from azure.identity import VisualStudioCodeCredential
+            creds.append(VisualStudioCodeCredential())
+        except Exception:
+            pass
+        creds.append(AzureCliCredential())
+        creds.append(InteractiveBrowserCredential())
+        return ChainedTokenCredential(*creds)
+
+    def _build_interactive_credential(self, login_hint: Optional[str] = None):
+        """Build an interactive browser credential with optional login hint."""
+        from azure.identity import InteractiveBrowserCredential
+        kwargs = {}
+        if login_hint:
+            kwargs["login_hint"] = login_hint
+        return InteractiveBrowserCredential(**kwargs)
+
+    def _get_credential(self):
+        """Lazy-init the credential (first call only)."""
+        if self._credential is None:
+            try:
+                self._credential = self._build_default_chain()
+            except ImportError:
+                raise ImportError(
+                    "azure-identity not installed. "
+                    "Run: pip install azure-identity azure-identity-broker"
+                )
+            logger.info("Azure credential chain initialised (dynamic, session-based)")
         return self._credential
 
     def _get_token(self) -> str:
-        """Get a valid access token, refreshing if expired."""
+        """
+        Get a valid access token, with automatic _AZR account validation.
+
+        Flow:
+        1. Try the default credential chain (cache / VS Code / CLI / browser)
+        2. Decode the JWT and check which account was used
+        3. If NOT an _AZR account → open a fresh browser login prompt
+           so the user can sign in with their _AZR account
+        4. Cache the token for subsequent calls
+        """
         now = time.time()
         if self._token and now < self._token_expires - 60:
             return self._token
 
         credential = self._get_credential()
-        token = credential.get_token(FABRIC_SCOPE)
-        self._token = token.token
-        self._token_expires = token.expires_on
-        logger.debug("Fabric token acquired, expires at %s", token.expires_on)
+        token_obj = credential.get_token(FABRIC_SCOPE)
+        claims = self._decode_jwt_claims(token_obj.token)
+        upn = claims.get("upn", claims.get("preferred_username", ""))
+
+        if not self._is_azr_account(upn):
+            # The session account doesn't have Fabric access — re-auth
+            logger.warning(
+                "Session account '%s' is not an _AZR account. "
+                "Opening browser login for Azure resource access...",
+                upn,
+            )
+            # Build a fresh interactive credential.
+            # If we already know an _AZR UPN from a previous session we
+            # use it as a login_hint; otherwise the user picks the account.
+            hint = self._authenticated_upn if self._authenticated_upn else None
+            self._interactive_credential = self._build_interactive_credential(
+                login_hint=hint
+            )
+            token_obj = self._interactive_credential.get_token(FABRIC_SCOPE)
+            claims = self._decode_jwt_claims(token_obj.token)
+            upn = claims.get("upn", claims.get("preferred_username", ""))
+
+            if not self._is_azr_account(upn):
+                logger.error(
+                    "Authenticated as '%s' which is still not an _AZR account. "
+                    "Please sign in with your _AZR account that has Fabric access.",
+                    upn,
+                )
+                raise PermissionError(
+                    f"Fabric requires an _AZR account. "
+                    f"You signed in as '{upn}'. "
+                    f"Please sign in with your _AZR account "
+                    f"(e.g. yourname_azr@domain.com) and try again."
+                )
+
+            # Future calls should go through this credential directly
+            self._credential = self._interactive_credential
+
+        self._token = token_obj.token
+        self._token_expires = token_obj.expires_on
+        self._authenticated_upn = upn
+        logger.info("Fabric token acquired for %s", upn)
         return self._token
 
     def _headers(self) -> Dict[str, str]:
@@ -181,14 +236,23 @@ class FabricRestClient:
             "Content-Type": "application/json",
         }
 
-    def check_auth(self) -> bool:
-        """Test if authentication works."""
+    def get_authenticated_account(self) -> Optional[str]:
+        """Return the UPN of the currently authenticated account, or None."""
+        return self._authenticated_upn
+
+    def check_auth(self) -> Tuple[bool, str]:
+        """
+        Test authentication and return (success, account_upn).
+
+        If the current session is not an _AZR account, this will
+        automatically open a browser login prompt.
+        """
         try:
             self._get_token()
-            return True
+            return True, self._authenticated_upn or "unknown"
         except Exception as exc:
             logger.error("Auth check failed: %s", exc)
-            return False
+            return False, str(exc)
 
     # ------------------------------------------------------------------
     # Workspace resolution (name → ID)

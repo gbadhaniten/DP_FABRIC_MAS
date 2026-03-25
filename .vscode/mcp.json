@@ -6,8 +6,7 @@
       "args": ["mcp_server.py"],
       "cwd": "${workspaceFolder}",
       "env": {
-        "FABRIC_WORKSPACE_ID": "8952abd5-c851-4c8c-a6ba-2748519aebe3",
-        "FABRIC_USERNAME": "gbadhani_azr@technipenergies.com"
+        "FABRIC_WORKSPACE_ID": "8952abd5-c851-4c8c-a6ba-2748519aebe3"
       }
     }
   }
