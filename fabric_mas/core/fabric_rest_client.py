@@ -28,6 +28,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -79,6 +80,52 @@ class FabricRestClient:
 
     # Persistent cache name — stored in OS secure credential store
     _CACHE_NAME = "fabric_mas_token_cache"
+
+    # AuthenticationRecord file — stores *which account* to use silently.
+    # This file contains NO secrets — just tenant/client/authority metadata
+    # that tells InteractiveBrowserCredential to silently refresh the cached
+    # refresh token instead of opening the browser.
+    _AUTH_RECORD_DIR = Path.home() / ".fabric_mas"
+    _AUTH_RECORD_FILE = _AUTH_RECORD_DIR / "auth_record.json"
+
+    # ------------------------------------------------------------------
+    # AuthenticationRecord persistence (login once, reuse forever)
+    # ------------------------------------------------------------------
+    @classmethod
+    def _save_auth_record(cls, record) -> None:
+        """Persist AuthenticationRecord to disk (no secrets — just account metadata)."""
+        try:
+            cls._AUTH_RECORD_DIR.mkdir(parents=True, exist_ok=True)
+            cls._AUTH_RECORD_FILE.write_text(record.serialize(), encoding="utf-8")
+            logger.info("Auth record saved to %s", cls._AUTH_RECORD_FILE)
+        except Exception as exc:
+            logger.warning("Could not save auth record: %s", exc)
+
+    @classmethod
+    def _load_auth_record(cls):
+        """Load a previously saved AuthenticationRecord, or None."""
+        try:
+            if cls._AUTH_RECORD_FILE.exists():
+                from azure.identity import AuthenticationRecord
+                data = cls._AUTH_RECORD_FILE.read_text(encoding="utf-8")
+                record = AuthenticationRecord.deserialize(data)
+                logger.info("Loaded cached auth record from %s", cls._AUTH_RECORD_FILE)
+                return record
+        except Exception as exc:
+            logger.warning("Could not load auth record: %s", exc)
+        return None
+
+    @classmethod
+    def clear_auth_cache(cls) -> bool:
+        """Clear the saved auth record (forces re-login on next call)."""
+        try:
+            if cls._AUTH_RECORD_FILE.exists():
+                cls._AUTH_RECORD_FILE.unlink()
+                logger.info("Auth record cleared.")
+            return True
+        except Exception as exc:
+            logger.warning("Could not clear auth record: %s", exc)
+            return False
 
     def __init__(
         self,
@@ -142,55 +189,32 @@ class FabricRestClient:
 
     def _build_credential_with_cache(self):
         """
-        Build a credential chain with persistent caching.
+        Build the best credential for Fabric auth.
 
-        Order:
-        1. Cached _AZR token (from previous interactive login) — SILENT
-        2. Environment variables (CI / service principals)
-        3. VS Code / Azure CLI session
-        4. Interactive browser login (first time only)
+        Strategy:
+        - If an AuthenticationRecord exists on disk → build an
+          InteractiveBrowserCredential with it → SILENT token refresh
+        - If no record exists → build a bare InteractiveBrowserCredential
+          → browser opens ONCE → we'll save the record after authenticate()
 
-        The key insight: InteractiveBrowserCredential with a persistent
-        cache will silently use the cached refresh token on subsequent
-        calls. The browser only opens on the very first login or when
-        the refresh token expires.
+        Fallback chain (EnvironmentCredential → AzureCLI) only for CI/service
+        principal scenarios where no interactive login is possible.
         """
-        from azure.identity import (
-            ChainedTokenCredential,
-            EnvironmentCredential,
-            SharedTokenCacheCredential,
-            AzureCliCredential,
-            InteractiveBrowserCredential,
-        )
+        from azure.identity import InteractiveBrowserCredential
 
         cache_opts = self._get_cache_options()
-        creds = []
+        auth_record = self._load_auth_record()
 
-        # 1. Environment variables (for CI / service principals)
-        creds.append(EnvironmentCredential())
-
-        # 2. Our own persistent interactive credential (cached from first login)
-        #    This is the primary path after the first login — it silently uses
-        #    the stored refresh token without opening a browser.
-        interactive_kwargs = {}
+        kwargs = {}
         if cache_opts:
-            interactive_kwargs["cache_persistence_options"] = cache_opts
-        creds.append(InteractiveBrowserCredential(**interactive_kwargs))
+            kwargs["cache_persistence_options"] = cache_opts
+        if auth_record:
+            kwargs["authentication_record"] = auth_record
+            logger.info(
+                "Using cached auth record — silent token refresh (no browser)"
+            )
 
-        # 3. Shared token cache (picks up other Azure logins on the machine)
-        creds.append(SharedTokenCacheCredential())
-
-        # 4. VS Code Azure extension
-        try:
-            from azure.identity import VisualStudioCodeCredential
-            creds.append(VisualStudioCodeCredential())
-        except Exception:
-            pass
-
-        # 5. Azure CLI
-        creds.append(AzureCliCredential())
-
-        return ChainedTokenCredential(*creds)
+        return InteractiveBrowserCredential(**kwargs)
 
     def _build_interactive_credential(self, login_hint: Optional[str] = None):
         """Build a fresh interactive browser credential (forces browser prompt)."""
@@ -201,6 +225,8 @@ class FabricRestClient:
             kwargs["login_hint"] = login_hint
         if cache_opts:
             kwargs["cache_persistence_options"] = cache_opts
+        # Don't pass old auth_record here — we WANT the browser to open
+        # so user can sign in with the correct _AZR account
         return InteractiveBrowserCredential(**kwargs)
 
     def _get_credential(self):
@@ -222,47 +248,73 @@ class FabricRestClient:
 
         Flow:
         1. Try cached token (in-memory) — instant, no I/O
-        2. Try credential chain (persistent cache → env → VS Code → CLI → browser)
-        3. Decode JWT → verify it's an _AZR account
-        4. If wrong account → open browser with login hint → re-verify
-        5. Cache token in-memory for subsequent calls in this session
+        2. If AuthenticationRecord exists → silent refresh (no browser)
+        3. If no AuthenticationRecord → call authenticate() → browser opens ONCE
+           → save AuthenticationRecord to disk
+        4. Decode JWT → verify it's an _AZR account
+        5. If wrong account → clear cache → re-auth with browser
+        6. Cache token in-memory for rest of session
 
-        First run:  browser opens → user logs in with _AZR → token cached to OS store
-        Next runs:  cached refresh token used silently — no browser prompt
+        First run:  browser opens → save AuthenticationRecord → done
+        Next runs:  AuthenticationRecord loaded → silent refresh → no browser
+        Token expiry: refresh token handles this (~90 days before re-login)
         """
         now = time.time()
         if self._token and now < self._token_expires - 60:
             return self._token
 
         credential = self._get_credential()
-        token_obj = credential.get_token(FABRIC_SCOPE)
-        claims = self._decode_jwt_claims(token_obj.token)
-        upn = claims.get("upn", claims.get("preferred_username", ""))
 
-        if not self._is_azr_account(upn):
-            # Wrong account — need to re-auth with _AZR account
-            logger.warning(
-                "Session account '%s' is not an _AZR account. "
-                "Opening browser login for Azure resource access...",
-                upn,
-            )
-            hint = self._authenticated_upn if self._authenticated_upn else None
-            interactive = self._build_interactive_credential(login_hint=hint)
-            token_obj = interactive.get_token(FABRIC_SCOPE)
+        # If this is the first time (no auth record on disk), use
+        # authenticate() which returns the AuthenticationRecord AND
+        # gets the token in one shot.
+        has_auth_record = self._AUTH_RECORD_FILE.exists()
+
+        if not has_auth_record:
+            logger.info("No auth record found — browser login required (one time only)")
+            auth_record = credential.authenticate(scopes=[FABRIC_SCOPE])
+            token_obj = credential.get_token(FABRIC_SCOPE)
             claims = self._decode_jwt_claims(token_obj.token)
             upn = claims.get("upn", claims.get("preferred_username", ""))
 
             if not self._is_azr_account(upn):
-                raise PermissionError(
-                    f"Fabric requires an _AZR account. "
-                    f"You signed in as '{upn}'. "
-                    f"Please sign in with your _AZR account "
-                    f"(e.g. yourname_azr@domain.com) and try again."
+                logger.warning(
+                    "Signed in as '%s' (not an _AZR account). Retrying...", upn
                 )
+                # Force a new interactive login with hint
+                interactive = self._build_interactive_credential(login_hint=None)
+                auth_record = interactive.authenticate(scopes=[FABRIC_SCOPE])
+                token_obj = interactive.get_token(FABRIC_SCOPE)
+                claims = self._decode_jwt_claims(token_obj.token)
+                upn = claims.get("upn", claims.get("preferred_username", ""))
+                credential = interactive
 
-            # Replace credential chain with the interactive one that now has
-            # the _AZR token cached to the persistent store
-            self._credential = interactive
+                if not self._is_azr_account(upn):
+                    raise PermissionError(
+                        f"Fabric requires an _AZR account. "
+                        f"You signed in as '{upn}'. "
+                        f"Please sign in with your _AZR account "
+                        f"(e.g. yourname_azr@domain.com) and try again."
+                    )
+
+            # Save the auth record → all future calls will be silent
+            self._save_auth_record(auth_record)
+            self._credential = credential
+
+        else:
+            # Auth record exists → silent refresh (no browser)
+            token_obj = credential.get_token(FABRIC_SCOPE)
+            claims = self._decode_jwt_claims(token_obj.token)
+            upn = claims.get("upn", claims.get("preferred_username", ""))
+
+            if not self._is_azr_account(upn):
+                # Cached record was for wrong account — clear and retry
+                logger.warning(
+                    "Cached auth is for '%s' (not _AZR). Clearing cache...", upn
+                )
+                self.clear_auth_cache()
+                self._credential = None
+                return self._get_token()  # recursive — will take the no-record path
 
         self._token = token_obj.token
         self._token_expires = token_obj.expires_on
