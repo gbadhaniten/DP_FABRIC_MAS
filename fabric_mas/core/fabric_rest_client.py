@@ -1,9 +1,18 @@
 """
 fabric_rest_client.py — Microsoft Fabric REST API Client
 ==========================================================
-Uses Azure Identity (DefaultAzureCredential) so it shares the same
+Uses Azure Identity with smart credential chain so it shares the same
 authentication as VS Code / Azure extensions. No separate `fab auth login`
 required.
+
+Authentication order:
+    1. Environment variables (AZURE_CLIENT_ID etc.)  — for CI / service principals
+    2. Shared token cache (FABRIC_USERNAME env var)   — cached Azure tokens
+    3. VS Code signed-in Azure account                — requires Azure Resources ext
+    4. Azure CLI (`az login`)                         — if installed
+    5. Interactive browser login (auto-opens prompt)  — last resort, always works
+
+Set FABRIC_USERNAME=gbadhani_azr@technipenergies.com to pin a specific account.
 
 Fabric REST API base: https://api.fabric.microsoft.com/v1
 
@@ -19,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -46,14 +56,15 @@ class FabricRestClient:
     """
     REST client for Microsoft Fabric using Azure Identity.
 
-    Authentication precedence (via DefaultAzureCredential):
-    1. Environment variables (AZURE_CLIENT_ID, etc.)
-    2. Managed Identity
-    3. VS Code / Azure CLI signed-in user  <-- this is what makes it work
-    4. Azure PowerShell
-    5. Interactive browser (fallback)
+    Authentication uses a smart credential chain (similar to MS Fabric MCP):
+    1. Environment variables (service principal / CI)
+    2. SharedTokenCacheCredential pinned to FABRIC_USERNAME
+    3. VS Code signed-in Azure account
+    4. Azure CLI
+    5. Interactive browser login (opens prompt — always works)
 
-    This means if you're signed into Azure in VS Code, it Just Works™.
+    Set env var FABRIC_USERNAME to pin to a specific Azure account,
+    e.g. FABRIC_USERNAME=gbadhani_azr@technipenergies.com
     """
 
     def __init__(
@@ -61,10 +72,12 @@ class FabricRestClient:
         default_workspace_id: Optional[str] = None,
         dry_run: bool = False,
         timeout: int = 60,
+        username: Optional[str] = None,
     ):
         self.default_workspace_id = default_workspace_id
         self.dry_run = dry_run
         self.timeout = timeout
+        self.username = username or os.getenv("FABRIC_USERNAME")
         self._token: Optional[str] = None
         self._token_expires: float = 0
         self._credential = None
@@ -74,17 +87,78 @@ class FabricRestClient:
     # Authentication
     # ------------------------------------------------------------------
     def _get_credential(self):
-        """Lazy-init Azure credential."""
-        if self._credential is None:
+        """
+        Build a credential chain that mirrors how MS Fabric MCP authenticates.
+
+        When FABRIC_USERNAME is set (specific account required):
+            1. EnvironmentCredential       — CI / service principals
+            2. SharedTokenCacheCredential   — cached tokens for that user
+            3. InteractiveBrowserCredential — opens browser with login_hint
+            (VS Code credential is SKIPPED because it may use a different account)
+
+        When FABRIC_USERNAME is NOT set (use whatever account is available):
+            1. EnvironmentCredential
+            2. SharedTokenCacheCredential
+            3. VisualStudioCodeCredential   — VS Code Azure sign-in
+            4. AzureCliCredential
+            5. InteractiveBrowserCredential — browser prompt
+        """
+        if self._credential is not None:
+            return self._credential
+
+        try:
+            from azure.identity import (
+                ChainedTokenCredential,
+                EnvironmentCredential,
+                SharedTokenCacheCredential,
+                AzureCliCredential,
+                InteractiveBrowserCredential,
+            )
+        except ImportError:
+            raise ImportError(
+                "azure-identity not installed. Run: pip install azure-identity azure-identity-broker"
+            )
+
+        credentials = []
+
+        # 1. Environment variables (AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID)
+        credentials.append(EnvironmentCredential())
+
+        if self.username:
+            # ── Pinned-account mode ──
+            # Skip VS Code / CLI credentials because they may be signed into a
+            # different account.  Go straight to cached tokens → browser prompt.
+            logger.info("Auth: pinned to account %s", self.username)
+
+            # 2. Shared token cache for that specific user
+            credentials.append(
+                SharedTokenCacheCredential(username=self.username)
+            )
+
+            # 3. Interactive browser with login_hint → pre-fills the email
+            #    After first login the token is cached for subsequent calls.
+            credentials.append(
+                InteractiveBrowserCredential(login_hint=self.username)
+            )
+        else:
+            # ── Auto mode — use whatever Azure identity is available ──
+            credentials.append(SharedTokenCacheCredential())
+
             try:
-                from azure.identity import DefaultAzureCredential
-                self._credential = DefaultAzureCredential()
-                logger.info("Azure DefaultAzureCredential initialized")
-            except ImportError:
-                logger.error(
-                    "azure-identity not installed. Run: pip install azure-identity"
-                )
-                raise
+                from azure.identity import VisualStudioCodeCredential
+                credentials.append(VisualStudioCodeCredential())
+            except Exception:
+                pass
+
+            credentials.append(AzureCliCredential())
+            credentials.append(InteractiveBrowserCredential())
+
+        self._credential = ChainedTokenCredential(*credentials)
+        logger.info(
+            "Azure credential chain ready (%d providers, account=%s)",
+            len(credentials),
+            self.username or "auto-detect",
+        )
         return self._credential
 
     def _get_token(self) -> str:
