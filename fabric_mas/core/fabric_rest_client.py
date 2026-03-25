@@ -60,21 +60,25 @@ class FabricRestClient:
     """
     REST client for Microsoft Fabric using Azure Identity.
 
-    Authentication is fully dynamic — no credentials are stored:
+    Authentication is fully dynamic — no credentials are stored in code:
 
-    1. Acquires a token using the Azure credential chain
-       (token cache → VS Code → Azure CLI → interactive browser)
-    2. Inspects the JWT to check which account was used
-    3. If the account is NOT an _AZR account (no Fabric access),
-       automatically opens a browser login prompt so the user can
-       sign in with their _AZR account
-    4. Caches the session — subsequent calls reuse the token until
-       it expires
+    1. First run: opens a browser login prompt → user signs in with _AZR account
+    2. Token + refresh token are persisted to the OS-level secure cache
+       (Windows Credential Manager / macOS Keychain / Linux keyring)
+    3. All subsequent calls (including across MCP server restarts) silently
+       reuse the cached session — no browser prompt needed
+    4. Only re-prompts when the refresh token expires (typically 90 days)
+       or the cache is cleared
 
-    This mirrors how MS Fabric MCP handles auth:
-    - Use the signed-in session if it has the right permissions
-    - Open a login prompt if not
+    The JWT is inspected to verify an _AZR account was used. If the first
+    cached/session token belongs to a non-_AZR account, a browser prompt
+    opens automatically so the user can sign in with the correct account.
+
+    This mirrors how MS Fabric MCP handles auth.
     """
+
+    # Persistent cache name — stored in OS secure credential store
+    _CACHE_NAME = "fabric_mas_token_cache"
 
     def __init__(
         self,
@@ -88,7 +92,6 @@ class FabricRestClient:
         self._token: Optional[str] = None
         self._token_expires: float = 0
         self._credential = None
-        self._interactive_credential = None  # fallback for re-auth
         self._authenticated_upn: Optional[str] = None
         self._workspace_name_cache: Dict[str, str] = {}  # name -> id
 
@@ -114,18 +117,43 @@ class FabricRestClient:
         return _AZR_ACCOUNT_MARKER in upn.lower() if upn else False
 
     # ------------------------------------------------------------------
-    # Authentication — fully dynamic, no stored credentials
+    # Persistent token cache — login once, reuse across restarts
     # ------------------------------------------------------------------
-    def _build_default_chain(self):
+    @staticmethod
+    def _get_cache_options():
         """
-        Build the default credential chain.
+        Build TokenCachePersistenceOptions for the OS secure credential store.
+
+        This stores refresh tokens in:
+        - Windows: Windows Credential Manager
+        - macOS:   Keychain
+        - Linux:   keyring / encrypted file
+
+        No passwords or secrets are stored in code or config files.
+        """
+        try:
+            from azure.identity import TokenCachePersistenceOptions
+            return TokenCachePersistenceOptions(
+                name=FabricRestClient._CACHE_NAME,
+                allow_unencrypted_storage=False,
+            )
+        except ImportError:
+            return None
+
+    def _build_credential_with_cache(self):
+        """
+        Build a credential chain with persistent caching.
 
         Order:
-        1. EnvironmentCredential          — CI / service principals
-        2. SharedTokenCacheCredential      — picks up any cached Azure login
-        3. VisualStudioCodeCredential      — VS Code Azure Resources sign-in
-        4. AzureCliCredential              — az login session
-        5. InteractiveBrowserCredential    — opens browser (last resort)
+        1. Cached _AZR token (from previous interactive login) — SILENT
+        2. Environment variables (CI / service principals)
+        3. VS Code / Azure CLI session
+        4. Interactive browser login (first time only)
+
+        The key insight: InteractiveBrowserCredential with a persistent
+        cache will silently use the cached refresh token on subsequent
+        calls. The browser only opens on the very first login or when
+        the refresh token expires.
         """
         from azure.identity import (
             ChainedTokenCredential,
@@ -135,50 +163,72 @@ class FabricRestClient:
             InteractiveBrowserCredential,
         )
 
-        creds = [
-            EnvironmentCredential(),
-            SharedTokenCacheCredential(),
-        ]
+        cache_opts = self._get_cache_options()
+        creds = []
+
+        # 1. Environment variables (for CI / service principals)
+        creds.append(EnvironmentCredential())
+
+        # 2. Our own persistent interactive credential (cached from first login)
+        #    This is the primary path after the first login — it silently uses
+        #    the stored refresh token without opening a browser.
+        interactive_kwargs = {}
+        if cache_opts:
+            interactive_kwargs["cache_persistence_options"] = cache_opts
+        creds.append(InteractiveBrowserCredential(**interactive_kwargs))
+
+        # 3. Shared token cache (picks up other Azure logins on the machine)
+        creds.append(SharedTokenCacheCredential())
+
+        # 4. VS Code Azure extension
         try:
             from azure.identity import VisualStudioCodeCredential
             creds.append(VisualStudioCodeCredential())
         except Exception:
             pass
+
+        # 5. Azure CLI
         creds.append(AzureCliCredential())
-        creds.append(InteractiveBrowserCredential())
+
         return ChainedTokenCredential(*creds)
 
     def _build_interactive_credential(self, login_hint: Optional[str] = None):
-        """Build an interactive browser credential with optional login hint."""
+        """Build a fresh interactive browser credential (forces browser prompt)."""
         from azure.identity import InteractiveBrowserCredential
+        cache_opts = self._get_cache_options()
         kwargs = {}
         if login_hint:
             kwargs["login_hint"] = login_hint
+        if cache_opts:
+            kwargs["cache_persistence_options"] = cache_opts
         return InteractiveBrowserCredential(**kwargs)
 
     def _get_credential(self):
-        """Lazy-init the credential (first call only)."""
+        """Lazy-init the credential chain (first call only)."""
         if self._credential is None:
             try:
-                self._credential = self._build_default_chain()
+                self._credential = self._build_credential_with_cache()
             except ImportError:
                 raise ImportError(
                     "azure-identity not installed. "
                     "Run: pip install azure-identity azure-identity-broker"
                 )
-            logger.info("Azure credential chain initialised (dynamic, session-based)")
+            logger.info("Azure credential chain ready (persistent cache enabled)")
         return self._credential
 
     def _get_token(self) -> str:
         """
-        Get a valid access token, with automatic _AZR account validation.
+        Get a valid access token with _AZR account validation.
 
         Flow:
-        1. Try the default credential chain (cache / VS Code / CLI / browser)
-        2. Decode the JWT and check which account was used
-        3. If NOT an _AZR account → open a fresh browser login prompt
-           so the user can sign in with their _AZR account
-        4. Cache the token for subsequent calls
+        1. Try cached token (in-memory) — instant, no I/O
+        2. Try credential chain (persistent cache → env → VS Code → CLI → browser)
+        3. Decode JWT → verify it's an _AZR account
+        4. If wrong account → open browser with login hint → re-verify
+        5. Cache token in-memory for subsequent calls in this session
+
+        First run:  browser opens → user logs in with _AZR → token cached to OS store
+        Next runs:  cached refresh token used silently — no browser prompt
         """
         now = time.time()
         if self._token and now < self._token_expires - 60:
@@ -190,29 +240,19 @@ class FabricRestClient:
         upn = claims.get("upn", claims.get("preferred_username", ""))
 
         if not self._is_azr_account(upn):
-            # The session account doesn't have Fabric access — re-auth
+            # Wrong account — need to re-auth with _AZR account
             logger.warning(
                 "Session account '%s' is not an _AZR account. "
                 "Opening browser login for Azure resource access...",
                 upn,
             )
-            # Build a fresh interactive credential.
-            # If we already know an _AZR UPN from a previous session we
-            # use it as a login_hint; otherwise the user picks the account.
             hint = self._authenticated_upn if self._authenticated_upn else None
-            self._interactive_credential = self._build_interactive_credential(
-                login_hint=hint
-            )
-            token_obj = self._interactive_credential.get_token(FABRIC_SCOPE)
+            interactive = self._build_interactive_credential(login_hint=hint)
+            token_obj = interactive.get_token(FABRIC_SCOPE)
             claims = self._decode_jwt_claims(token_obj.token)
             upn = claims.get("upn", claims.get("preferred_username", ""))
 
             if not self._is_azr_account(upn):
-                logger.error(
-                    "Authenticated as '%s' which is still not an _AZR account. "
-                    "Please sign in with your _AZR account that has Fabric access.",
-                    upn,
-                )
                 raise PermissionError(
                     f"Fabric requires an _AZR account. "
                     f"You signed in as '{upn}'. "
@@ -220,8 +260,9 @@ class FabricRestClient:
                     f"(e.g. yourname_azr@domain.com) and try again."
                 )
 
-            # Future calls should go through this credential directly
-            self._credential = self._interactive_credential
+            # Replace credential chain with the interactive one that now has
+            # the _AZR token cached to the persistent store
+            self._credential = interactive
 
         self._token = token_obj.token
         self._token_expires = token_obj.expires_on
