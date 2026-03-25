@@ -2,9 +2,9 @@
   "servers": {
     "fabric-mas": {
       "type": "stdio",
-      "command": "python",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
       "args": ["mcp_server.py"],
-      "cwd": "."
+      "cwd": "${workspaceFolder}"
     }
   }
 }
