@@ -1,0 +1,20 @@
+# Fabric Multi-Agent System (Fabric-MAS) Dependencies
+# ====================================================
+# Copilot-Native: No OpenAI/LangChain API key required.
+# GitHub Copilot acts as the LLM via VS Code MCP integration.
+
+# MCP / FastMCP — Model Context Protocol integration
+mcp>=1.0.0
+fastmcp>=0.5.0
+
+# Web Search / Autotrain (optional — for live API doc fetching)
+tavily-python>=0.3.0
+requests>=2.31.0
+
+# Microsoft Fabric CLI
+ms-fabric-cli>=0.1.0
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+rich>=13.7.0

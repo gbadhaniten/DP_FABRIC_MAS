@@ -1,0 +1,44 @@
+# Fabric-MAS .gitignore
+# =====================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Environment variables (contains secrets)
+.env
+
+# IDE
+.vscode/settings.json
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Workflow output (auto-generated HTML)
+workflow_output/
+
+# Backup files
+*.bak
+*.backup
+
+# Logs
+*.log
+
+# Jupyter
+.ipynb_checkpoints/

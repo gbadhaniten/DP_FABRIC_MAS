@@ -1,0 +1,433 @@
+# 📖 HOW TO USE — Fabric Multi-Agent System (Fabric-MAS)
+
+> **Copilot-Native** — No OpenAI API key needed. GitHub Copilot is the LLM.
+
+## Table of Contents
+1. [Quick Start (One-Prompt Setup)](#quick-start-one-prompt-setup)
+2. [Prerequisites](#prerequisites)
+3. [Installation](#installation)
+4. [Configuration](#configuration)
+5. [VS Code + Copilot Integration](#vs-code--copilot-integration)
+6. [Agent Activation & Lifecycle](#agent-activation--lifecycle)
+7. [Using the 8 MCP Tools](#using-the-8-mcp-tools)
+8. [Example Sessions](#example-sessions)
+9. [Data Modeling Agent](#data-modeling-agent)
+10. [Agent Knowledge System](#agent-knowledge-system)
+11. [Customising Agents](#customising-agents)
+12. [Troubleshooting](#troubleshooting)
+
+---
+
+## Quick Start (One-Prompt Setup)
+
+The fastest way to get started — run a single command:
+
+```powershell
+python setup_wizard.py
+```
+
+This script automatically:
+1. ✅ Checks Python version (3.10+ required)
+2. ✅ Creates a virtual environment (`.venv/`)
+3. ✅ Installs all dependencies from `requirements.txt`
+4. ✅ Creates `.env` from `.env.example` (no API keys needed!)
+5. ✅ Checks Microsoft Fabric CLI (`fab`) installation
+6. ✅ Configures `.vscode/mcp.json` for MCP integration
+7. ✅ Validates the system (imports, agent count, config)
+
+After setup, open VS Code and start talking to Copilot — it will auto-discover the MCP tools.
+
+---
+
+## Prerequisites
+
+| Requirement | Version | Purpose | Required? |
+|------------|---------|---------|-----------|
+| Python | 3.10+ | Runtime | ✅ Yes |
+| Microsoft Fabric CLI | Latest | `fab` commands for Fabric operations | ✅ Yes |
+| VS Code | 1.96+ | IDE with MCP support | ✅ Yes |
+| GitHub Copilot | Active licence | LLM for natural language processing | ✅ Yes |
+| Tavily API Key | — | Auto-train documentation search | ❌ Optional |
+
+> **No OpenAI API Key needed!** GitHub Copilot (included with your licence) acts as
+> the LLM through VS Code MCP integration.
+
+---
+
+## Installation
+
+### 1. Clone the Repository
+```powershell
+git clone https://github.com/YOUR_USERNAME/FABRIC-MAS.git
+cd FABRIC-MAS
+```
+
+### 2. Run the Setup Wizard (Recommended)
+```powershell
+python setup_wizard.py
+```
+
+### Or Manual Setup:
+
+```powershell
+# Create virtual environment
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# Install dependencies (no OpenAI/LangChain needed!)
+pip install -r requirements.txt
+
+# Install Fabric CLI
+pip install ms-fabric-cli
+fab auth login
+
+# Create .env
+Copy-Item .env.example .env
+```
+
+---
+
+## Configuration
+
+### Create `.env` File
+```powershell
+Copy-Item .env.example .env
+```
+
+Edit `.env`:
+```env
+# No OpenAI API key needed! GitHub Copilot is the LLM.
+
+# Optional — for auto-train documentation search
+TAVILY_API_KEY=tvly-your-tavily-key-here
+
+# Optional — default workspace for all operations
+FABRIC_WORKSPACE_ID=your-default-workspace-id
+
+# Start with dry-run mode (no real Fabric changes)
+FABRIC_DRY_RUN=true
+```
+
+---
+
+## VS Code + Copilot Integration
+
+### How It Works
+
+```
+┌──────────────────────────────────┐
+│  GitHub Copilot (your LLM)       │
+│  Understands natural language     │
+│  Has your Copilot licence ✓      │
+└──────────┬───────────────────────┘
+           │ Calls MCP tools
+           ▼
+┌──────────────────────────────────┐
+│  Fabric-MAS MCP Server           │
+│  8 tools for Fabric management   │
+│  Keyword-based routing           │
+│  49 specialized agents           │
+└──────────┬───────────────────────┘
+           │ Executes via fab CLI
+           ▼
+┌──────────────────────────────────┐
+│  Microsoft Fabric Platform       │
+│  Workspaces, Lakehouses, etc.   │
+└──────────────────────────────────┘
+```
+
+### MCP Configuration
+
+The setup wizard creates `.vscode/mcp.json` automatically. Or create it manually:
+
+```json
+{
+  "servers": {
+    "fabric-mas": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["mcp_server.py"],
+      "cwd": "."
+    }
+  }
+}
+```
+
+### Using Copilot with Fabric-MAS
+
+1. Open VS Code in the FABRIC-MAS folder
+2. Open GitHub Copilot Chat (`Ctrl+Shift+I`)
+3. MCP tools are auto-discovered — just type naturally:
+
+```
+You: "Create a Bronze and Silver lakehouse in workspace abc-123"
+Copilot: [Uses execute_fabric_task tool] → Routes to lakehouse-agent → Executes
+```
+
+```
+You: "Show me all available Fabric agents"
+Copilot: [Uses list_available_agents tool] → Returns 49 agents
+```
+
+```
+You: "Generate a star schema for sales analytics with SCD Type 2"
+Copilot: [Uses run_fabric_agent tool with data_modeling agent] → Generates model
+```
+
+### Verify MCP Connection
+1. Open VS Code Command Palette (`Ctrl+Shift+P`)
+2. Run: **MCP: List Servers**
+3. You should see `fabric-mas` with 8 tools listed
+
+---
+
+## Agent Activation & Lifecycle
+
+### How Agents Are Activated
+
+Fabric-MAS uses a **lazy auto-discovery** pattern:
+
+```
+VS Code starts → MCP server boots → Agents are dormant
+    │
+User sends prompt via Copilot
+    │
+Copilot calls MCP tool → _get_orchestrator() creates singleton
+    │
+orch.auto_register() scans agents/*/ folders → 49 agents registered
+    │
+Keyword planner identifies agents from prompt → Creates execution plan
+    │
+_get_agent_instance(key) → Lazy instantiation + knowledge loading
+    │
+agent.execute(operation, params) → CLI command → Result
+    │
+Auto-learning: result logged to examples.md
+```
+
+### Agent Lifecycle States
+
+| State | Description | When |
+|-------|-------------|------|
+| **Dormant** | Agent folder exists but nothing loaded | Before first query |
+| **Registered** | Class imported into `AgentRegistry` | After `auto_register()` |
+| **Active** | Instance created, knowledge loaded | First time plan references agent |
+| **Executing** | Running a CLI command or API call | During `agent.execute()` |
+| **Learning** | Writing execution results to `examples.md` | After each execution |
+| **Cached** | Instance kept in memory for reuse | Between executions |
+
+### What Triggers an Agent?
+
+The keyword planner (or Copilot via `run_fabric_agent`) decides which agents to activate:
+
+```
+"Create a lakehouse"       → lakehouse-agent
+"Set up real-time alerts"  → eventhouse + eventstream + data-activator
+"Build a star schema"      → data-modeling-agent
+"Deploy to production"     → deployment-pipeline-agent
+```
+
+---
+
+## Using the 8 MCP Tools
+
+### Tool 1: `execute_fabric_task`
+**Main entry point** — takes natural language, plans, and executes.
+
+```
+Input: "Create Bronze and Silver lakehouses in workspace abc-123"
+→ Keyword planner detects: lakehouse-agent, create operation
+→ Executes 2 steps, returns results + workflow HTML
+```
+
+### Tool 2: `run_fabric_agent`
+**Direct agent execution** — when you know exactly what to do.
+
+```
+Input: agent_key="lakehouse", operation="create", params={"display_name": "Bronze"}
+→ Bypasses planner, calls LakehouseAgent.create() directly
+```
+
+### Tool 3: `list_available_agents`
+Returns all 49 registered agents with types, codes, and operations.
+
+### Tool 4: `search_fabric_docs`
+Searches Microsoft Fabric documentation via Tavily/Bing.
+
+### Tool 5: `get_agent_knowledge`
+Retrieves an agent's knowledge files (instructions, examples, known issues).
+
+### Tool 6: `update_agent_knowledge`
+Updates an agent's knowledge files — perfect for customizing guidelines.
+
+```
+Input: agent_key="data_modeling", file_name="instructions",
+       content="Use prefix 'f_' for facts", mode="append"
+→ Appends custom naming convention to data-modeling-agent/instructions.md
+```
+
+### Tool 7: `visualize_workflow`
+Generates a visual workflow diagram WITHOUT executing (preview mode).
+
+### Tool 8: `get_system_status`
+Returns system health: agent count, configuration, tool list.
+
+---
+
+## Example Sessions
+
+### 🏗️ Build a Medallion Architecture
+```
+Prompt: "Create a medallion architecture with Bronze, Silver, Gold
+lakehouses and ETL notebooks in workspace ws-data-prod"
+
+Agents activated: lakehouse-agent (×3), notebook-agent (×2), data-pipeline-agent
+```
+
+### 📊 Generate a Data Model
+```
+Prompt: "Generate a star schema for sales analytics with SCD Type 2
+dimensions and output as SQL"
+
+Agent: data-modeling-agent → Generates SQL DDL with fact + dimension tables
+```
+
+### 🔧 Update Modeling Guidelines
+```
+Prompt: "Update our data modeling guidelines: use 'f_' prefix for facts
+and 'd_' prefix for dimensions instead of 'Fact_' and 'Dim_'"
+
+Agent: data-modeling-agent → Updates instructions.md with custom conventions
+```
+
+### ⚡ Real-Time Intelligence Setup
+```
+Prompt: "Set up real-time analytics with eventhouse, eventstream,
+KQL database, and live dashboard"
+
+Agents: eventhouse + eventstream + kql-database + realtime-dashboard
+```
+
+### 🔐 Workspace Governance
+```
+Prompt: "Create workspace Finance-Prod, assign F64 capacity,
+configure admin roles, apply Confidential labels"
+
+Agents: workspace + capacity + security + sensitivity-label
+```
+
+---
+
+## Data Modeling Agent
+
+The **Data Modeling Agent** is a specialized agent for dimensional modeling:
+
+### Capabilities
+- Generate star/snowflake schema models
+- Apply SCD Type 1, 2, or 3
+- Enforce naming conventions
+- Output as SQL DDL, TMDL, or JSON
+- **Updateable guidelines** — customize for your organization
+
+### Update Guidelines
+Use the `update_agent_knowledge` MCP tool or tell Copilot:
+
+```
+"Update the data modeling guidelines to use our company naming conventions:
+tables should use PascalCase, columns snake_case, facts prefixed with 'f_'"
+```
+
+The agent reads its `instructions.md` for all modeling decisions, so updating
+that file changes all future model generations.
+
+---
+
+## Agent Knowledge System
+
+Each of the 49 agents has co-located knowledge files:
+
+```
+agents/lakehouse-agent/
+├── agent.py              # Python code
+├── instructions.md       # How the agent behaves — editable
+├── examples.md           # Few-shot examples + auto-logged history
+└── known_issues.md       # Bugs and workarounds — editable
+```
+
+### Auto-Learning
+After every execution, results are auto-logged to `examples.md`:
+- Per-agent results → each agent's `examples.md`
+- Overall task summaries → `orchestrator-agent/examples.md`
+- Copilot sees these patterns in future requests for better routing
+
+---
+
+## Customising Agents
+
+### Adding a New Agent
+
+1. Create folder: `fabric_mas/agents/my-item-agent/`
+2. Create `agent.py`:
+   ```python
+   from fabric_mas.core.base_agent import BaseAgent, AgentResult, OperationType
+
+   class MyItemAgent(BaseAgent):
+       ITEM_TYPE = "My Item"
+       ITEM_CODE = "MI"
+       FAB_NOUN = "my-item"
+       AGENT_FOLDER_NAME = "my-item-agent"
+
+       def create(self, params): ...
+       def update(self, item_id, params): ...
+       def delete(self, item_id): ...
+       def analyze(self, item_id=None, **kwargs): ...
+       def deploy(self, item_id, target, **kwargs): ...
+   ```
+3. Add `__init__.py`, `instructions.md`, `examples.md`, `known_issues.md`
+4. The orchestrator **auto-discovers** it at startup — no manual registration!
+
+---
+
+## Troubleshooting
+
+### MCP Server Won't Start
+```powershell
+python -c "from fabric_mas.core.orchestrator import Orchestrator; print('OK')"
+```
+
+### Agent Not Found
+```powershell
+python -c "
+from fabric_mas.core.orchestrator import Orchestrator
+o = Orchestrator()
+o.auto_register()
+print(o.registry.list_agents())
+"
+```
+
+### Copilot Not Using MCP Tools
+1. Verify `.vscode/mcp.json` exists in the project root
+2. Run: `Ctrl+Shift+P` → **MCP: List Servers** → Check `fabric-mas`
+3. Restart VS Code if tools aren't showing
+4. Ensure GitHub Copilot extension is active
+
+### Fabric CLI Errors
+```powershell
+fab auth status    # Check authentication
+fab auth login     # Re-authenticate
+fab workspace list # Test a simple command
+```
+
+---
+
+## Environment Variables Reference
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `FABRIC_WORKSPACE_ID` | ❌ | — | Default workspace for all operations |
+| `TAVILY_API_KEY` | ❌ | — | Tavily search for auto-train |
+| `BING_SEARCH_API_KEY` | ❌ | — | Bing fallback for auto-train |
+| `FABRIC_DRY_RUN` | ❌ | `false` | Enable dry-run mode (no real changes) |
+| `LOG_LEVEL` | ❌ | `INFO` | Logging verbosity |
+
+> **Note:** No `OPENAI_API_KEY` or `OPENAI_MODEL` needed. GitHub Copilot is the LLM!

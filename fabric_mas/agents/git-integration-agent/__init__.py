@@ -1,0 +1,2 @@
+﻿from fabric_mas.agents.git_integration_agent.agent import GitIntegrationAgent
+

@@ -1,0 +1,2 @@
+﻿from fabric_mas.agents.sql_endpoint_agent.agent import SQLAnalyticsEndpointAgent
+
