@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fabric-MAS Agent Flow Visualiser</title>
+<style>
+  :root {
+    --navy: #0F2D5E; --teal: #006B8F; --teal-l: #E1F5EE;
+    --green: #00695C; --green-l: #E8F5E9; --gold: #B07D1E; --gold-l: #FFF8E1;
+    --purple: #534AB7; --purple-l: #EEEDFE; --gray: #64748B; --gray-l: #F8F9FA;
+    --red: #C0392B; --red-l: #FDECEA; --amber: #BA7517; --amber-l: #FFF3E0;
+    --border: #E2E8F0; --bg: #F8FAFC; --white: #FFFFFF;
+    --text: #1E293B; --text-s: #64748B; --text-xs: #94A3B8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  body { background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── HEADER ── */
+  header { background: var(--navy); color: #fff; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .logo { font-size: 16px; font-weight: 600; letter-spacing: -0.3px; }
+  .logo span { color: #48CAE4; }
+  .hdr-btns { display: flex; gap: 8px; }
+  .hdr-btn { background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); color: #fff; border-radius: 6px; padding: 6px 14px; font-size: 12px; cursor: pointer; transition: background .15s; }
+  .hdr-btn:hover { background: rgba(255,255,255,0.2); }
+  .hdr-btn.primary { background: var(--teal); border-color: var(--teal); }
+  .status-pill { display: flex; align-items: center; gap: 6px; font-size: 12px; color: rgba(255,255,255,0.7); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #48CAE4; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* ── LAYOUT ── */
+  .layout { display: grid; grid-template-columns: 280px 1fr 300px; height: calc(100vh - 52px); overflow: hidden; }
+
+  /* ── LEFT PANEL ── */
+  .left { background: var(--white); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .panel-hdr { padding: 14px 16px 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-xs); border-bottom: 1px solid var(--border); }
+  .job-list { overflow-y: auto; flex: 1; }
+  .job-item { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .1s; }
+  .job-item:hover { background: var(--gray-l); }
+  .job-item.active { background: #EFF6FF; border-left: 3px solid var(--teal); }
+  .job-name { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 3px; }
+  .job-meta { font-size: 11px; color: var(--text-s); display: flex; justify-content: space-between; }
+  .job-status { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .s-done { background: var(--green-l); color: var(--green); }
+  .s-run  { background: var(--amber-l); color: var(--amber); }
+  .s-fail { background: var(--red-l); color: var(--red); }
+  .s-idle { background: var(--gray-l); color: var(--gray); }
+
+  /* ── CENTER ── */
+  .center { display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+  .center-hdr { padding: 12px 20px; background: var(--white); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+  .job-title { font-size: 15px; font-weight: 600; color: var(--text); }
+  .job-desc { font-size: 12px; color: var(--text-s); margin-top: 1px; }
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); background: var(--white); }
+  .tab { padding: 10px 18px; font-size: 13px; color: var(--text-s); cursor: pointer; border-bottom: 2px solid transparent; transition: all .1s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--teal); border-bottom-color: var(--teal); font-weight: 500; }
+  .tab-content { flex: 1; overflow: auto; padding: 16px 20px; }
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+
+  /* ── FLOW CANVAS ── */
+  #flowCanvas { width: 100%; min-height: 420px; position: relative; }
+  .flow-svg { width: 100%; height: 420px; }
+
+  /* ── TIMELINE ── */
+  .timeline { padding: 4px 0; }
+  .tl-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .tl-label { font-size: 11px; color: var(--text-s); width: 150px; flex-shrink: 0; text-align: right; }
+  .tl-bar-wrap { flex: 1; background: var(--border); border-radius: 4px; height: 22px; position: relative; overflow: hidden; }
+  .tl-bar { height: 22px; border-radius: 4px; display: flex; align-items: center; padding: 0 8px; font-size: 10px; font-weight: 600; color: #fff; position: absolute; top: 0; transition: opacity .2s; }
+  .tl-ms { font-size: 10px; color: var(--text-xs); width: 48px; flex-shrink: 0; text-align: right; }
+
+  /* ── TABLE ── */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  thead th { background: var(--navy); color: #fff; padding: 9px 12px; text-align: left; font-weight: 500; font-size: 11px; }
+  tbody tr { border-bottom: 1px solid var(--border); }
+  tbody tr:hover { background: var(--gray-l); }
+  tbody td { padding: 9px 12px; color: var(--text); vertical-align: middle; }
+  .chip { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+  .chip-ok { background: var(--green-l); color: var(--green); }
+  .chip-warn { background: var(--amber-l); color: var(--amber); }
+  .chip-err { background: var(--red-l); color: var(--red); }
+  .chip-cli { background: var(--purple-l); color: var(--purple); }
+  .chip-api { background: var(--teal-l); color: var(--teal); }
+
+  /* ── TOKEN PANEL ── */
+  .right { background: var(--white); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .token-meter { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .meter-lbl { font-size: 11px; color: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+  .meter-bar { height: 10px; background: var(--border); border-radius: 5px; overflow: hidden; margin-bottom: 6px; }
+  .meter-fill { height: 10px; border-radius: 5px; transition: width .4s; }
+  .meter-nums { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-s); }
+  .token-breakdown { padding: 12px 16px; flex: 1; overflow-y: auto; }
+  .tb-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .tb-label { display: flex; align-items: center; gap: 7px; color: var(--text); }
+  .tb-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+  .tb-val { font-weight: 600; color: var(--text); font-size: 12px; }
+  .tip-box { margin: 12px 16px; padding: 10px 12px; background: var(--teal-l); border-radius: 8px; font-size: 11px; line-height: 1.5; color: var(--teal); }
+  .tip-box strong { display: block; font-size: 11px; margin-bottom: 3px; color: #0F6E56; }
+  .tip-list { list-style: none; }
+  .tip-list li { padding: 3px 0; font-size: 11px; color: var(--text-s); }
+  .tip-list li::before { content: '→ '; color: var(--teal); font-weight: 600; }
+  .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 16px; }
+  .metric-c { background: var(--gray-l); border-radius: 8px; padding: 10px 12px; }
+  .metric-v { font-size: 20px; font-weight: 600; color: var(--text); }
+  .metric-l { font-size: 10px; color: var(--text-s); margin-top: 2px; }
+
+  /* ── MINI LOG ── */
+  .log-stream { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; background: #0D1117; color: #C9D1D9; padding: 12px; border-radius: 8px; height: 220px; overflow-y: auto; line-height: 1.7; }
+  .log-ts { color: #8B949E; }
+  .log-agent { color: #79C0FF; }
+  .log-op { color: #A5D6FF; }
+  .log-ok { color: #56D364; }
+  .log-err { color: #F85149; }
+  .log-cli { color: #D2A8FF; }
+  .log-tok { color: #FFA657; }
+  .log-info { color: #8B949E; }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">Fabric-<span>MAS</span> Agent Visualiser</div>
+    <div class="status-pill"><div class="dot"></div> MCP server live · 49 agents registered</div>
+  </div>
+  <div class="hdr-btns">
+    <button class="hdr-btn" onclick="clearLog()">Clear log</button>
+    <button class="hdr-btn" onclick="exportCSV()">Export CSV</button>
+    <button class="hdr-btn primary" onclick="runDemo()">Run demo job</button>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- LEFT: job list -->
+  <div class="left">
+    <div class="panel-hdr">Session jobs</div>
+    <div class="job-list" id="jobList"></div>
+  </div>
+
+  <!-- CENTER: flow + tabs -->
+  <div class="center">
+    <div class="center-hdr">
+      <div>
+        <div class="job-title" id="jobTitle">Select a job</div>
+        <div class="job-desc" id="jobDesc">Click any job in the left panel to inspect agent flow</div>
+      </div>
+    </div>
+    <div class="tabs">
+      <div class="tab active" onclick="showTab('flow')">Agent flow</div>
+      <div class="tab" onclick="showTab('timeline')">Timeline</div>
+      <div class="tab" onclick="showTab('table')">Activity table</div>
+      <div class="tab" onclick="showTab('log')">CLI log</div>
+    </div>
+    <div class="tab-content">
+      <div class="tab-pane active" id="tab-flow">
+        <div id="flowCanvas"></div>
+      </div>
+      <div class="tab-pane" id="tab-timeline">
+        <div class="timeline" id="timelinePanel"></div>
+      </div>
+      <div class="tab-pane" id="tab-table">
+        <div style="overflow-x:auto">
+        <table id="activityTable">
+          <thead><tr>
+            <th>#</th><th>Agent</th><th>Operation</th><th>CLI / API</th>
+            <th>Start (ms)</th><th>Duration</th><th>Tokens</th><th>Status</th>
+          </tr></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+        </div>
+      </div>
+      <div class="tab-pane" id="tab-log">
+        <div class="log-stream" id="logStream"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: token panel -->
+  <div class="right">
+    <div class="panel-hdr" style="padding:14px 16px 10px">Token intelligence</div>
+
+    <div class="token-meter">
+      <div class="meter-lbl">Context window usage</div>
+      <div class="meter-bar">
+        <div class="meter-fill" id="ctxFill" style="width:0%;background:#006B8F"></div>
+      </div>
+      <div class="meter-nums">
+        <span id="ctxUsed">0 k used</span>
+        <span id="ctxMax">192 k total</span>
+      </div>
+    </div>
+
+    <div class="metrics-grid">
+      <div class="metric-c"><div class="metric-v" id="mTotalTok">0</div><div class="metric-l">Total tokens (session)</div></div>
+      <div class="metric-c"><div class="metric-v" id="mJobTok">0</div><div class="metric-l">Tokens this job</div></div>
+      <div class="metric-c"><div class="metric-v" id="mAgents">0</div><div class="metric-l">Agents activated</div></div>
+      <div class="metric-c"><div class="metric-v" id="mDuration">0 ms</div><div class="metric-l">Total duration</div></div>
+    </div>
+
+    <div class="token-breakdown">
+      <div class="panel-hdr" style="padding:0 0 8px;border:none">Token breakdown — this job</div>
+      <div id="breakdown"></div>
+    </div>
+
+    <div class="tip-box">
+      <strong>Token reduction tips</strong>
+    </div>
+    <ul class="tip-list" style="padding:0 16px 12px">
+      <li>Route via <code>run_fabric_agent</code> not <code>execute_fabric_task</code> — saves ~40% prompt tokens by bypassing keyword planner reasoning</li>
+      <li>Use <code>plan_from_json()</code> — feed pre-built JSON plan, Copilot skips intent classification</li>
+      <li>Trim <code>examples.md</code> to 5 most recent — large history bloats agent knowledge load</li>
+      <li>Enable <code>FABRIC_DRY_RUN=false</code> — dry-run outputs verbose previews that consume tokens</li>
+      <li>Disable unused MCP tools in <code>mcp.json</code> — each tool description occupies ~80 tokens</li>
+      <li>Use official Fabric MCP server (<code>microsoft/mcp</code>) for schema lookups instead of <code>search_fabric_docs</code></li>
+      <li>Set <code>max_examples=3</code> in <code>BaseAgent.load_knowledge()</code> to cap few-shot examples</li>
+    </ul>
+  </div>
+
+</div>
+
+<script>
+const AGENT_COLORS = {
+  orchestrator: '#0F2D5E', lakehouse: '#006B8F', notebook: '#00695C',
+  pipeline: '#B07D1E', warehouse: '#534AB7', semantic_model: '#993C1D',
+  'data-modeling': '#185FA5', eventstream: '#854F0B', eventhouse: '#3B6D11',
+  realtime_dashboard: '#72243E', workspace: '#5F5E5A', security: '#A32D2D',
+  deployment_pipeline: '#0F6E56', sensitivity_label: '#712B13', monitoring: '#633806',
+};
+
+const JOBS = [
+  {
+    id: 1, name: 'Medallion architecture', status: 'done',
+    desc: 'Create Bronze, Silver, Gold lakehouses + pipelines in ws-analytics-dev',
+    totalMs: 8420, tokens: 4180,
+    steps: [
+      { agent:'orchestrator', op:'plan', mode:'llm', ms:0, dur:310, tok:820, cli:'plan_from_json()', status:'ok' },
+      { agent:'workspace', op:'validate', mode:'api', ms:310, dur:180, tok:240, cli:'fab workspace show ws-analytics-dev', status:'ok' },
+      { agent:'lakehouse', op:'create', mode:'cli', ms:490, dur:1240, tok:310, cli:'fab mkdir Bronze_Raw.Lakehouse', status:'ok' },
+      { agent:'lakehouse', op:'create', mode:'cli', ms:1730, dur:1180, tok:300, cli:'fab mkdir Silver_Transform.Lakehouse', status:'ok' },
+      { agent:'lakehouse', op:'create', mode:'cli', ms:2910, dur:1210, tok:298, cli:'fab mkdir Gold_Curated.Lakehouse', status:'ok' },
+      { agent:'notebook', op:'create', mode:'cli', ms:4120, dur:980, tok:410, cli:'fab mkdir ETL_Bronze_to_Silver.Notebook', status:'ok' },
+      { agent:'pipeline', op:'create', mode:'cli', ms:5100, dur:1050, tok:390, cli:'fab mkdir Ingest_SQL_to_Bronze.DataPipeline', status:'ok' },
+      { agent:'sensitivity_label', op:'apply', mode:'api', ms:6150, dur:720, tok:212, cli:'fab sensitivity set Gold_Curated Confidential', status:'ok' },
+      { agent:'orchestrator', op:'summarise', mode:'llm', ms:6870, dur:1550, tok:1200, cli:'generate_workflow_html()', status:'ok' },
+    ]
+  },
+  {
+    id: 2, name: 'Deploy Dev → Prod', status: 'done',
+    desc: 'Validate, promote finance analytics estate, run post-deploy checks',
+    totalMs: 12300, tokens: 5840,
+    steps: [
+      { agent:'orchestrator', op:'plan', mode:'llm', ms:0, dur:290, tok:780, cli:'plan_from_json()', status:'ok' },
+      { agent:'monitoring', op:'get_job_history', mode:'api', ms:290, dur:440, tok:310, cli:'fab job run-list --workspace finance-dev', status:'ok' },
+      { agent:'deployment_pipeline', op:'validate', mode:'api', ms:730, dur:620, tok:390, cli:'fab api -X get workspaces/{id}/items', status:'ok' },
+      { agent:'deployment_pipeline', op:'deploy', mode:'cli', ms:1350, dur:5800, tok:610, cli:'fab deploy --config ./config/finance-prod.yaml', status:'ok' },
+      { agent:'pipeline', op:'run', mode:'cli', ms:7150, dur:3200, tok:480, cli:'fab run DailyRefresh.DataPipeline --wait', status:'ok' },
+      { agent:'monitoring', op:'check', mode:'api', ms:10350, dur:890, tok:420, cli:'fab job run-list --workspace finance-prod', status:'ok' },
+      { agent:'orchestrator', op:'summarise', mode:'llm', ms:11240, dur:1060, tok:1850, cli:'generate_workflow_html()', status:'ok' },
+    ]
+  },
+  {
+    id: 3, name: 'Morning health check', status: 'run',
+    desc: 'Check pipeline failures, semantic model freshness, capacity utilisation',
+    totalMs: 4200, tokens: 2940,
+    steps: [
+      { agent:'orchestrator', op:'plan', mode:'llm', ms:0, dur:220, tok:610, cli:'plan_from_json()', status:'ok' },
+      { agent:'monitoring', op:'get_failed_jobs', mode:'api', ms:220, dur:1100, tok:480, cli:'fab job run-list --hours 8 --status Failed', status:'ok' },
+      { agent:'monitoring', op:'get_capacity_metrics', mode:'api', ms:1320, dur:890, tok:350, cli:'fab api -X get capacities/F64-Prod/metrics', status:'ok' },
+      { agent:'semantic_model', op:'check_refresh', mode:'api', ms:2210, dur:760, tok:290, cli:'fab api -X get workspaces/{id}/semanticModels', status:'ok' },
+      { agent:'pipeline', op:'run', mode:'cli', ms:2970, dur:1230, tok:380, cli:'fab run FailedPipeline.DataPipeline --wait', status:'run' },
+    ]
+  },
+  {
+    id: 4, name: 'Real-time intelligence', status: 'fail',
+    desc: 'Eventstream + KQL database + RTI dashboard for IoT sensor data',
+    totalMs: 3100, tokens: 2100,
+    steps: [
+      { agent:'orchestrator', op:'plan', mode:'llm', ms:0, dur:280, tok:650, cli:'plan_from_json()', status:'ok' },
+      { agent:'workspace', op:'validate', mode:'api', ms:280, dur:200, tok:190, cli:'fab workspace show rti-prod', status:'ok' },
+      { agent:'eventstream', op:'create', mode:'cli', ms:480, dur:1100, tok:310, cli:'fab mkdir sensor-stream.Eventstream', status:'ok' },
+      { agent:'eventhouse', op:'create', mode:'cli', ms:1580, dur:980, tok:290, cli:'fab mkdir sensor_kqldb.KQLDatabase', status:'fail' },
+    ]
+  },
+];
+
+let SESSION_TOKENS = 0;
+let currentJob = null;
+let logLines = [];
+const MAX_CTX = 192000;
+
+function init() {
+  renderJobList();
+  selectJob(JOBS[0]);
+}
+
+function renderJobList() {
+  const el = document.getElementById('jobList');
+  el.innerHTML = JOBS.map(j => `
+    <div class="job-item ${j.id === (currentJob && currentJob.id) ? 'active' : ''}" onclick="selectJob(JOBS.find(x=>x.id===${j.id}))">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+        <div class="job-name">${j.name}</div>
+        <span class="job-status s-${j.status === 'done' ? 'done' : j.status === 'run' ? 'run' : 'fail'}">${j.status}</span>
+      </div>
+      <div class="job-meta"><span>${j.steps.length} agents</span><span>${(j.tokens/1000).toFixed(1)}k tok</span><span>${j.totalMs}ms</span></div>
+    </div>
+  `).join('');
+}
+
+function selectJob(job) {
+  currentJob = job;
+  document.getElementById('jobTitle').textContent = job.name;
+  document.getElementById('jobDesc').textContent = job.desc;
+  renderJobList();
+  renderFlow(job);
+  renderTimeline(job);
+  renderTable(job);
+  renderTokenPanel(job);
+  renderLog(job);
+}
+
+function showTab(id) {
+  document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', ['flow','timeline','table','log'][i] === id));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-'+id));
+}
+
+// ─── FLOW SVG ───────────────────────────────────────────────────────────────
+function renderFlow(job) {
+  const W = 740, PW = 130, PH = 48, GAP = 20, ROW = 80;
+  const steps = job.steps;
+  const cols = 5;
+  const rows = Math.ceil(steps.length / cols);
+  const H = 60 + rows * ROW + 40;
+
+  let nodes = '', arrows = '', labels = '';
+  steps.forEach((s, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    const x = 30 + col * (PW + GAP);
+    const y = 50 + row * ROW;
+    const cx = x + PW / 2, cy = y + PH / 2;
+    const col_ = AGENT_COLORS[s.agent] || '#64748B';
+    const statusStroke = s.status === 'ok' ? '#56D364' : s.status === 'run' ? '#FFA657' : '#F85149';
+    const statusFill = s.status === 'ok' ? '' : s.status === 'run' ? 'fill-opacity:0.06;fill:#FFA657;' : 'fill-opacity:0.06;fill:#F85149;';
+
+    nodes += `<g>
+      <rect x="${x}" y="${y}" width="${PW}" height="${PH}" rx="6" fill="${col_}" style="${statusFill}"/>
+      <rect x="${x}" y="${y}" width="${PW}" height="${PH}" rx="6" fill="none" stroke="${statusStroke}" stroke-width="1.5" opacity="0.7"/>
+      <text x="${cx}" y="${y+18}" text-anchor="middle" font-size="10" font-weight="600" fill="#fff" font-family="sans-serif">${s.agent}</text>
+      <text x="${cx}" y="${y+31}" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.75)" font-family="sans-serif">${s.op}</text>
+      <text x="${cx}" y="${y+43}" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.6)" font-family="sans-serif">${s.dur}ms · ${s.tok}tok</text>
+    </g>`;
+
+    if (i < steps.length - 1) {
+      const nextCol = (i + 1) % cols, nextRow = Math.floor((i + 1) / cols);
+      const nx = 30 + nextCol * (PW + GAP), ny = 50 + nextRow * ROW;
+      const ncx = nx + PW / 2, ncy = ny + PH / 2;
+      if (nextRow === row) {
+        arrows += `<line x1="${x+PW}" y1="${cy}" x2="${nx}" y2="${ncy}" stroke="#CBD5E1" stroke-width="1.2" marker-end="url(#arr)"/>`;
+      } else {
+        const ex = x + PW + (nextCol === 0 ? 10 : GAP/2);
+        arrows += `<path d="M${x+PW} ${cy} L${ex} ${cy} L${ex} ${ncy} L${nx} ${ncy}" fill="none" stroke="#CBD5E1" stroke-width="1.2" marker-end="url(#arr)"/>`;
+      }
+    }
+  });
+
+  // Master node at top
+  const masterX = W/2 - 70;
+  const masterNode = `<rect x="${masterX}" y="4" width="140" height="36" rx="7" fill="#0F2D5E"/>
+    <text x="${masterX+70}" y="19" text-anchor="middle" font-size="11" font-weight="600" fill="#fff" font-family="sans-serif">Orchestrator (Master)</text>
+    <text x="${masterX+70}" y="32" text-anchor="middle" font-size="9" fill="#90CDF4" font-family="sans-serif">plans · routes · learns</text>`;
+
+  // Fan arrows from master to first few agents
+  let fanArrows = '';
+  const firstRowCount = Math.min(steps.length, cols);
+  for (let i = 0; i < Math.min(firstRowCount, 3); i++) {
+    const tx = 30 + i * (PW + GAP) + PW / 2;
+    fanArrows += `<line x1="${masterX+70}" y1="40" x2="${tx}" y2="50" stroke="#48CAE4" stroke-width="1" stroke-dasharray="3 2" marker-end="url(#arrb)" opacity="0.6"/>`;
+  }
+
+  const fullH = H + 20;
+  const svg = `<svg width="100%" viewBox="0 0 ${W} ${fullH}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+        <path d="M2 1L8 5L2 9" fill="none" stroke="#CBD5E1" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>
+      <marker id="arrb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+        <path d="M2 1L8 5L2 9" fill="none" stroke="#48CAE4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>
+    </defs>
+    ${masterNode}${fanArrows}${arrows}${nodes}
+    <text x="10" y="${fullH-6}" font-size="9" fill="#94A3B8" font-family="sans-serif">
+      Legend: green border = success · amber = running · red = failed
+    </text>
+  </svg>`;
+  document.getElementById('flowCanvas').innerHTML = svg;
+}
+
+// ─── TIMELINE ───────────────────────────────────────────────────────────────
+function renderTimeline(job) {
+  const total = job.totalMs;
+  const el = document.getElementById('timelinePanel');
+  const colors = Object.values(AGENT_COLORS);
+  let html = '';
+  job.steps.forEach((s, i) => {
+    const left = (s.ms / total * 100).toFixed(1);
+    const width = Math.max((s.dur / total * 100), 1).toFixed(1);
+    const col = AGENT_COLORS[s.agent] || colors[i % colors.length];
+    html += `<div class="tl-row">
+      <div class="tl-label">${s.agent} · ${s.op}</div>
+      <div class="tl-bar-wrap">
+        <div class="tl-bar" style="left:${left}%;width:${width}%;background:${col}">${s.dur > 400 ? s.dur+'ms' : ''}</div>
+      </div>
+      <div class="tl-ms">${s.dur}ms</div>
+    </div>`;
+  });
+  // Total line
+  html += `<div class="tl-row" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+    <div class="tl-label" style="font-weight:600;color:var(--text)">Total</div>
+    <div style="flex:1"></div>
+    <div class="tl-ms" style="font-weight:600;color:var(--text)">${total}ms</div>
+  </div>`;
+  el.innerHTML = html;
+}
+
+// ─── TABLE ──────────────────────────────────────────────────────────────────
+function renderTable(job) {
+  const tb = document.getElementById('tableBody');
+  tb.innerHTML = job.steps.map((s, i) => {
+    const statusChip = s.status === 'ok' ? '<span class="chip chip-ok">success</span>' :
+                       s.status === 'run' ? '<span class="chip chip-warn">running</span>' :
+                       '<span class="chip chip-err">failed</span>';
+    const modeChip = s.mode === 'cli' ? '<span class="chip chip-cli">CLI</span>' : '<span class="chip chip-api">API/LLM</span>';
+    return `<tr>
+      <td style="color:var(--text-xs)">${i+1}</td>
+      <td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${AGENT_COLORS[s.agent]||'#888'};margin-right:6px;vertical-align:middle"></span>${s.agent}</td>
+      <td>${s.op}</td>
+      <td>${modeChip}</td>
+      <td>${s.ms}</td>
+      <td><strong>${s.dur}</strong> ms</td>
+      <td>${s.tok}</td>
+      <td>${statusChip}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── TOKEN PANEL ─────────────────────────────────────────────────────────────
+function renderTokenPanel(job) {
+  SESSION_TOKENS += job.tokens;
+  const pct = Math.min((SESSION_TOKENS / MAX_CTX * 100), 100);
+  document.getElementById('ctxFill').style.width = pct.toFixed(1) + '%';
+  document.getElementById('ctxFill').style.background = pct > 70 ? '#C0392B' : pct > 40 ? '#B07D1E' : '#006B8F';
+  document.getElementById('ctxUsed').textContent = (SESSION_TOKENS / 1000).toFixed(1) + 'k used';
+  document.getElementById('mTotalTok').textContent = SESSION_TOKENS.toLocaleString();
+  document.getElementById('mJobTok').textContent = job.tokens.toLocaleString();
+  document.getElementById('mAgents').textContent = new Set(job.steps.map(s => s.agent)).size;
+  document.getElementById('mDuration').textContent = job.totalMs + ' ms';
+
+  const catMap = {};
+  job.steps.forEach(s => { catMap[s.agent] = (catMap[s.agent] || 0) + s.tok; });
+  const cats = Object.entries(catMap).sort((a, b) => b[1] - a[1]);
+  const total = cats.reduce((s, [, v]) => s + v, 0);
+  const bd = document.getElementById('breakdown');
+  bd.innerHTML = cats.map(([agent, tok]) => {
+    const pct = (tok / total * 100).toFixed(0);
+    const col = AGENT_COLORS[agent] || '#888';
+    return `<div class="tb-row">
+      <div class="tb-label"><div class="tb-dot" style="background:${col}"></div>${agent}</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:60px;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+          <div style="width:${pct}%;height:6px;background:${col};border-radius:3px"></div>
+        </div>
+        <div class="tb-val">${tok}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ─── LOG ─────────────────────────────────────────────────────────────────────
+function renderLog(job) {
+  const el = document.getElementById('logStream');
+  const lines = job.steps.map(s => {
+    const ts = new Date(Date.now() - job.totalMs + s.ms).toISOString().substr(11, 12);
+    const statusCol = s.status === 'ok' ? 'log-ok' : s.status === 'run' ? 'log-tok' : 'log-err';
+    const statusStr = s.status === 'ok' ? '✓' : s.status === 'run' ? '~' : '✗';
+    return `<div><span class="log-ts">[${ts}]</span> <span class="log-agent">${s.agent}</span><span class="log-info">.</span><span class="log-op">${s.op}</span>  <span class="log-cli">${s.cli}</span>  <span class="log-tok">${s.tok}tok</span>  <span class="${statusCol}">${statusStr} ${s.dur}ms</span></div>`;
+  });
+  el.innerHTML = lines.join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+// ─── DEMO RUNNER ─────────────────────────────────────────────────────────────
+function runDemo() {
+  const demoJob = {
+    id: Date.now(), name: 'Live demo job', status: 'run',
+    desc: 'Running demo: create workspace + lakehouse + semantic model',
+    totalMs: 0, tokens: 0, steps: []
+  };
+  JOBS.unshift(demoJob);
+  selectJob(demoJob);
+
+  const demoSteps = [
+    { agent:'orchestrator', op:'plan', mode:'llm', dur:280, tok:620, cli:'plan_from_json()', status:'ok' },
+    { agent:'workspace', op:'create', mode:'cli', dur:950, tok:280, cli:'fab workspace create demo-workspace', status:'ok' },
+    { agent:'lakehouse', op:'create', mode:'cli', dur:1100, tok:310, cli:'fab mkdir Demo_Lake.Lakehouse', status:'ok' },
+    { agent:'semantic_model', op:'create', mode:'api', dur:1200, tok:440, cli:'fab api -X post workspaces/{id}/semanticModels', status:'ok' },
+    { agent:'orchestrator', op:'summarise', mode:'llm', dur:800, tok:1100, cli:'generate_workflow_html()', status:'ok' },
+  ];
+
+  let elapsed = 0;
+  demoSteps.forEach((step, i) => {
+    setTimeout(() => {
+      step.ms = elapsed;
+      elapsed += step.dur;
+      demoJob.steps.push(step);
+      demoJob.totalMs = elapsed;
+      demoJob.tokens += step.tok;
+      if (i === demoSteps.length - 1) demoJob.status = 'done';
+      selectJob(demoJob);
+    }, i * 700);
+  });
+}
+
+function clearLog() {
+  document.getElementById('logStream').innerHTML = '';
+  SESSION_TOKENS = 0;
+  document.getElementById('ctxFill').style.width = '0%';
+  document.getElementById('mTotalTok').textContent = '0';
+}
+
+function exportCSV() {
+  if (!currentJob) return;
+  const rows = [['#','Agent','Operation','CLI_API','Start_ms','Duration_ms','Tokens','Status']];
+  currentJob.steps.forEach((s, i) => {
+    rows.push([i+1, s.agent, s.op, s.cli, s.ms, s.dur, s.tok, s.status]);
+  });
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv,' + encodeURIComponent(csv);
+  a.download = `fabric-mas-${currentJob.name.replace(/\s+/g,'-')}.csv`;
+  a.click();
+}
+
+init();
+</script>
+</body>
+</html>

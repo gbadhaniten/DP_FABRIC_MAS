@@ -15,12 +15,15 @@ Build a **Fabric Multi-Agent System (Fabric-MAS)** in Python that manages all Mi
 
 ```
 FABRIC-MAS/
-├── mcp_server.py                  # FastMCP server — 8 MCP tools
+├── mcp_server.py                  # FastMCP server — 9 MCP tools
 ├── setup_wizard.py                # One-prompt setup script
 ├── requirements.txt               # Dependencies (NO OpenAI/LangChain)
 ├── .env.example                   # Environment template (no API keys required)
 ├── .gitignore                     # Git ignore rules
 ├── .vscode/mcp.json               # MCP server configuration for VS Code
+├── .github/copilot-instructions.md # Orchestrator master prompt (Copilot custom instructions)
+├── fabric_mas_visualiser.html     # Agent flow visualiser dashboard
+├── Naming_Convention.md           # Item naming rules (40 prefixes, UPPER_SNAKE_CASE)
 ├── ARCHITECTURE.md                # System architecture documentation
 ├── HOW_TO_USE.md                  # Setup & usage guide
 ├── SAMPLE_PROMPTS.md              # Prompt catalogue
@@ -30,9 +33,10 @@ FABRIC-MAS/
 ├── fabric_mas/
 │   ├── __init__.py
 │   ├── core/
-│   │   ├── base_agent.py          # BaseAgent ABC + AgentKnowledge
-│   │   ├── orchestrator.py        # Keyword planner + AgentRegistry (NO LLM API)
-│   │   └── cli_wrapper.py         # FabricCLI subprocess wrapper
+│   │   ├── base_agent.py          # BaseAgent ABC + AgentKnowledge + NamingConvention
+│   │   ├── orchestrator.py        # Keyword planner + AgentRegistry + cross-workspace planning
+│   │   ├── fabric_rest_client.py  # REST API client (azure-identity, AuthenticationRecord)
+│   │   └── cli_wrapper.py         # FabricCLI subprocess wrapper (CLI fallback)
 │   ├── tools/
 │   │   ├── search_tool.py         # Tavily/Bing auto-train search
 │   │   └── workflow_visualizer.py # Rich + HTML workflow renderer
@@ -49,7 +53,7 @@ FABRIC-MAS/
 
 1. **Copilot IS the LLM** — No OpenAI/LangChain. Copilot calls MCP tools directly.
 2. **One Item = One Agent = One Folder** — code + knowledge co-located
-3. **8 MCP Tools** — rich descriptions help Copilot route correctly
+3. **9 MCP Tools** — rich descriptions help Copilot route correctly
 4. **Keyword-Based Routing** — fallback planner for `execute_fabric_task`
 5. **Direct Agent Execution** — `run_fabric_agent` bypasses planner
 6. **Auto-Learning** — every execution logged to `examples.md`
@@ -74,7 +78,7 @@ FABRIC-MAS/
 - `execute_agent_directly(agent_key, operation, params)`: direct agent call
 - `execute_task(prompt)`: end-to-end with auto-learning + visualization
 
-#### 3b. `mcp_server.py` — 8 MCP Tools
+#### 3b. `mcp_server.py` — 9 MCP Tools
 1. `execute_fabric_task(prompt)` — natural language → plan → execute
 2. `run_fabric_agent(agent_key, operation, params)` — direct agent call
 3. `list_available_agents()` — discover all 49 agents
@@ -83,8 +87,17 @@ FABRIC-MAS/
 6. `update_agent_knowledge(agent_key, file_name, content, mode)` — update knowledge
 7. `visualize_workflow(prompt)` — preview without executing
 8. `get_system_status()` — system health check
+9. `check_naming_convention(display_name, item_type)` — validate naming rules
 
-#### 3c. `base_agent.py` — Same as before (AgentKnowledge + BaseAgent ABC)
+#### 3c. `base_agent.py` — AgentKnowledge + BaseAgent ABC + NamingConvention
+- `NamingConvention` class: loads `Naming_Convention.md`, validates names, auto-corrects
+- `_run_rest()`: REST-first execution with fallback operations (create, delete, delete_by_name, find_by_name, get_definition, update_definition)
+- Cross-workspace helpers: `find_item_by_name()`, `resolve_item_id()`, `get_item_definition()`, `update_item_definition()`
+
+#### 3d. `fabric_rest_client.py` — Fabric REST API Client
+- Azure Identity with `InteractiveBrowserCredential` + `AuthenticationRecord` persistence
+- Silent token refresh (login once, reuse ~90 days)
+- Workspace/item CRUD, item discovery, definition CRUD, role assignments
 
 #### 3d. `setup_wizard.py` — One-Prompt Setup
 7 steps: Python check → venv → deps → .env → Fabric CLI → MCP config → validate

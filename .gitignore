@@ -46,3 +46,7 @@ workflow_output/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Scratch/operations scripts
+_ops.py
+test_*.py

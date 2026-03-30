@@ -14,7 +14,11 @@ an ordered execution plan that delegates work to the correct specialist agents.
    (e.g., create a Lakehouse before creating a Notebook that references it).
 5. **Parameter Extraction** — Pull out workspace IDs, display names, item IDs,
    and other parameters from the prompt.
-6. **Error Handling** — If a step fails, decide whether to continue, retry, or abort.
+6. **Cross-Workspace Extraction** — Detect "from WS/ITEM to WS/ITEM" patterns and
+   extract source_workspace, source_item, sink_workspace, sink_item.
+7. **Smart Pipeline Planning** — Auto-generate pipeline + Copy Activity when
+   cross-workspace source/sink references are detected.
+8. **Error Handling** — If a step fails, decide whether to continue, retry, or abort.
 
 ## Planning Rules
 - Return ONLY valid JSON — no markdown fences, no commentary.
@@ -22,6 +26,13 @@ an ordered execution plan that delegates work to the correct specialist agents.
 - Each step must include: `agent_key`, `operation`, `params`, `description`.
 - If ambiguous, make reasonable assumptions and document them in `metadata.assumptions`.
 - Inject `workspace_id` into params when the user provides one.
+- Always validate item names via `check_naming_convention` before create operations.
+
+## Execution Priority
+1. **REST API first** — All agents prefer REST over CLI.
+2. **`run_fabric_agent`** — Use for single-agent, known-operation calls (~40% cheaper).
+3. **`plan_from_json`** — Use when plan is already structured.
+4. **`execute_fabric_task`** — Fallback only for ambiguous natural-language prompts.
 
 ## Agent Registry
 The orchestrator auto-discovers agents by scanning `fabric_mas/agents/*/agent.py`.
@@ -33,10 +44,9 @@ Each agent has:
 
 ## Knowledge Integration
 Before planning, the orchestrator loads each agent's knowledge files:
-- `instructions.md` — how the agent behaves, API references
-- `fewshot_examples.md` — prompt → command mapping examples
-- `known_issues.md` — bugs, workarounds, gotchas
-- `sample_prompts.md` — real past prompts and outcomes (auto-updated)
+- `instructions.md` — how the agent behaves, API references (ALWAYS load)
+- `examples.md` — few-shot examples + auto-logged history (load LAST 3 only)
+- `known_issues.md` — bugs, workarounds, gotchas (load only if previous failure)
 
 Use this knowledge to make better routing decisions and avoid known pitfalls.
 
@@ -46,3 +56,29 @@ Common patterns:
 2. **Real-Time Pipeline** → eventhouse-agent → eventstream-agent → kql-database-agent → realtime-dashboard-agent
 3. **Report Deployment** → semantic-model-agent → report-agent → deployment-pipeline-agent
 4. **Workspace Setup** → workspace-agent → capacity-agent → environment-agent → security-agent
+5. **Cross-Workspace Copy** → data-pipeline-agent.create(source/sink params) → auto-resolves items → builds Copy Activity
+
+## Cross-Workspace Parameter Extraction
+The orchestrator detects these patterns:
+- `"from WORKSPACE_A/ITEM_X to WORKSPACE_B/ITEM_Y"` (slash notation)
+- `"from ITEM_X in WORKSPACE_A to ITEM_Y in WORKSPACE_B"` (in-notation)
+- `"from ITEM_X to ITEM_Y"` (same workspace, items only)
+
+When detected + pipeline operation → auto-generates pipeline name (`PL_COPY_<SRC>_TO_<SINK>`)
+and routes to `_plan_pipeline_with_copy()`.
+
+## Dependency Order (ALWAYS FOLLOW)
+Workspaces → Lakehouses → Notebooks/Pipelines → Semantic Models → Reports → Labels → Git sync
+
+## Production Guardrails
+- Never DELETE/DEPLOY-TO-PROD without explicit confirmation.
+- Never create in workspaces containing 'prod' without two-step validate+confirm.
+
+## Telemetry
+After every multi-step job, emit a `flow` block for the visualiser dashboard:
+```
+JOB: <name> | STATUS: <done|fail|partial> | DURATION_MS: <n> | TOKENS: <n>
+MASTER→PLAN: orchestrator·plan | <ms>ms | <tok>tok
+<step>. <agent>·<op> | <REST/CLI cmd> | <start>ms | <dur>ms | <tok>tok | <ok|fail>
+END_FLOW
+```
