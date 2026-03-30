@@ -515,12 +515,15 @@ class BaseAgent(ABC):
         """
         Execute an operation via REST API instead of CLI.
         Returns None if REST client is not available (falls back to CLI).
+
+        Supported operations: create, delete, delete_by_name, analyze, list,
+        update, get_definition, update_definition, find_by_name.
         """
         if not self.rest_client:
             return None
 
         ws = self._resolve_workspace(params.get("workspace_id"))
-        if not ws:
+        if not ws and operation not in ("find_by_name",):
             return AgentResult(
                 success=False,
                 operation=OperationType.CREATE,
@@ -537,18 +540,91 @@ class BaseAgent(ABC):
                     item_type=self.ITEM_TYPE,
                     display_name=params.get("display_name", "Untitled"),
                     description=params.get("description", ""),
+                    definition=params.get("definition"),
                 )
             elif operation == "delete":
                 item_id = params.get("item_id", "")
                 if not item_id:
+                    # Try delete by name
+                    display_name = params.get("display_name", "")
+                    if display_name:
+                        return self._run_rest("delete_by_name", params)
                     return AgentResult(
                         success=False, operation=OperationType.DELETE,
                         agent_name=self.__class__.__name__,
                         item_type=self.ITEM_TYPE,
-                        message="item_id required for delete",
-                        errors=["item_id missing"],
+                        message="item_id or display_name required for delete",
+                        errors=["item_id or display_name missing"],
                     )
                 result = self.rest_client.delete_item(ws, item_id)
+            elif operation == "delete_by_name":
+                display_name = params.get("display_name", "")
+                if not display_name:
+                    return AgentResult(
+                        success=False, operation=OperationType.DELETE,
+                        agent_name=self.__class__.__name__,
+                        item_type=self.ITEM_TYPE,
+                        message="display_name required for delete_by_name",
+                        errors=["display_name missing"],
+                    )
+                item = self.rest_client.find_item_by_name(display_name, ws, self.ITEM_TYPE)
+                if not item:
+                    return AgentResult(
+                        success=False, operation=OperationType.DELETE,
+                        agent_name=self.__class__.__name__,
+                        item_type=self.ITEM_TYPE,
+                        message=f"{self.ITEM_TYPE} '{display_name}' not found in workspace",
+                        errors=[f"Item not found: {display_name}"],
+                    )
+                result = self.rest_client.delete_item(ws, item["id"])
+                if result.success:
+                    result.data = item  # Include the item metadata in response
+            elif operation == "find_by_name":
+                display_name = params.get("display_name", "")
+                item = self.rest_client.find_item_by_name(display_name, ws, self.ITEM_TYPE)
+                if item:
+                    import json as _json
+                    return AgentResult(
+                        success=True,
+                        operation=OperationType.ANALYZE,
+                        agent_name=self.__class__.__name__,
+                        item_type=self.ITEM_TYPE,
+                        message=f"Found {self.ITEM_TYPE} '{display_name}'",
+                        data=item,
+                        cli_command=f"REST API: find {self.ITEM_TYPE} by name",
+                        cli_output=_json.dumps(item, indent=2, default=str),
+                    )
+                return AgentResult(
+                    success=False,
+                    operation=OperationType.ANALYZE,
+                    agent_name=self.__class__.__name__,
+                    item_type=self.ITEM_TYPE,
+                    message=f"{self.ITEM_TYPE} '{display_name}' not found",
+                    errors=[f"Item not found: {display_name}"],
+                )
+            elif operation == "get_definition":
+                item_id = params.get("item_id", "")
+                if not item_id:
+                    return AgentResult(
+                        success=False, operation=OperationType.ANALYZE,
+                        agent_name=self.__class__.__name__,
+                        item_type=self.ITEM_TYPE,
+                        message="item_id required for get_definition",
+                        errors=["item_id missing"],
+                    )
+                result = self.rest_client.get_item_definition(ws, item_id, self.ITEM_TYPE)
+            elif operation == "update_definition":
+                item_id = params.get("item_id", "")
+                definition = params.get("definition", {})
+                if not item_id or not definition:
+                    return AgentResult(
+                        success=False, operation=OperationType.UPDATE,
+                        agent_name=self.__class__.__name__,
+                        item_type=self.ITEM_TYPE,
+                        message="item_id and definition required for update_definition",
+                        errors=["item_id or definition missing"],
+                    )
+                result = self.rest_client.update_item_definition(ws, item_id, definition, self.ITEM_TYPE)
             elif operation in ("analyze", "list"):
                 result = self.rest_client.list_items(ws, self.ITEM_TYPE)
             elif operation == "update":
@@ -564,9 +640,13 @@ class BaseAgent(ABC):
             op_type = {
                 "create": OperationType.CREATE,
                 "delete": OperationType.DELETE,
+                "delete_by_name": OperationType.DELETE,
                 "update": OperationType.UPDATE,
+                "update_definition": OperationType.UPDATE,
                 "analyze": OperationType.ANALYZE,
                 "list": OperationType.ANALYZE,
+                "get_definition": OperationType.ANALYZE,
+                "find_by_name": OperationType.ANALYZE,
             }.get(operation, OperationType.CREATE)
 
             if result.success:
@@ -578,7 +658,7 @@ class BaseAgent(ABC):
                     agent_name=self.__class__.__name__,
                     item_type=self.ITEM_TYPE,
                     message=f"{operation.title()} {self.ITEM_TYPE} succeeded",
-                    data=result.data,
+                    data=result.data if isinstance(result.data, dict) else {"items": result.data},
                     cli_command=f"REST API: {operation} {self.ITEM_TYPE}",
                     cli_output=data_str,
                 )
@@ -595,6 +675,59 @@ class BaseAgent(ABC):
         except Exception as exc:
             logger.error("REST API error: %s", exc)
             return None  # Fall back to CLI
+
+    # ------------------------------------------------------------------
+    # Cross-workspace item discovery helpers
+    # ------------------------------------------------------------------
+    def find_item_by_name(
+        self,
+        display_name: str,
+        workspace_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Find a Fabric item of this agent's type by display name.
+
+        Searches within a specific workspace or across all accessible
+        workspaces. Returns dict with id, displayName, workspace_id, etc.
+        """
+        if not self.rest_client:
+            return None
+        ws = self._resolve_workspace(workspace_id) if workspace_id else None
+        return self.rest_client.find_item_by_name(display_name, ws, self.ITEM_TYPE)
+
+    def resolve_item_id(
+        self,
+        display_name: str,
+        workspace_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """Resolve item display_name → item_id (within a workspace or globally)."""
+        item = self.find_item_by_name(display_name, workspace_id)
+        return item.get("id") if item else None
+
+    def get_item_definition(
+        self,
+        item_id: str,
+        workspace_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Get the definition (source content) of an item."""
+        if not self.rest_client:
+            return None
+        ws = self._resolve_workspace(workspace_id) or self.workspace_id
+        result = self.rest_client.get_item_definition(ws, item_id, self.ITEM_TYPE)
+        return result.data if result.success else None
+
+    def update_item_definition(
+        self,
+        item_id: str,
+        definition: Dict[str, Any],
+        workspace_id: Optional[str] = None,
+    ) -> bool:
+        """Update the definition of an item. Returns True on success."""
+        if not self.rest_client:
+            return False
+        ws = self._resolve_workspace(workspace_id) or self.workspace_id
+        result = self.rest_client.update_item_definition(ws, item_id, definition, self.ITEM_TYPE)
+        return result.success
 
     def _run(self, command: str) -> AgentResult:
         """Execute a fab command and wrap the output in an AgentResult."""
@@ -713,7 +846,25 @@ class BaseAgent(ABC):
             "analyze": self.analyze,
             "deploy": self.deploy,
         }
+
+        # Extended REST-only operations (no CLI equivalent needed)
+        rest_ops = {
+            "find_by_name", "delete_by_name",
+            "get_definition", "update_definition",
+        }
+
         handler = op_map.get(operation)
+
+        # For REST-only operations, route through _run_rest directly
+        if operation in rest_ops:
+            rest_result = self._run_rest(operation, params)
+            if rest_result is not None:
+                return rest_result
+            return self._make_result(
+                OperationType.ANALYZE, False,
+                f"Operation '{operation}' requires REST client (not available)",
+            )
+
         if handler is None:
             return self._make_result(
                 OperationType.CREATE,

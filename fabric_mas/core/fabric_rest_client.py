@@ -609,6 +609,184 @@ class FabricRestClient:
         )
 
     # ------------------------------------------------------------------
+    # Item definition CRUD (pipelines, notebooks, etc.)
+    # ------------------------------------------------------------------
+    def get_item_definition(
+        self,
+        workspace_id: str,
+        item_id: str,
+        item_type: Optional[str] = None,
+    ) -> RestResult:
+        """
+        Get the definition (source content) of an item.
+
+        Uses the ``POST .../getDefinition`` endpoint which returns the
+        item's definition parts (e.g. pipeline-content.json for DataPipeline).
+
+        Args:
+            workspace_id: GUID of the workspace.
+            item_id: GUID of the item.
+            item_type: Optional Fabric item type for the URL path
+                       (e.g. "dataPipelines", "notebooks"). If None, uses generic items endpoint.
+        """
+        if item_type:
+            # Type-specific endpoint: /workspaces/{ws}/dataPipelines/{id}/getDefinition
+            type_slug = self._item_type_to_slug(item_type)
+            url = f"{FABRIC_API_BASE}/workspaces/{workspace_id}/{type_slug}/{item_id}/getDefinition"
+        else:
+            url = f"{FABRIC_API_BASE}/workspaces/{workspace_id}/items/{item_id}/getDefinition"
+
+        return self._request("POST", url, description=f"getDefinition {item_id}")
+
+    def update_item_definition(
+        self,
+        workspace_id: str,
+        item_id: str,
+        definition: Dict[str, Any],
+        item_type: Optional[str] = None,
+    ) -> RestResult:
+        """
+        Update the definition (source content) of an item.
+
+        Uses the ``POST .../updateDefinition`` endpoint. The definition
+        payload should contain ``{"definition": {"parts": [...]}}``.
+
+        Args:
+            workspace_id: GUID of the workspace.
+            item_id: GUID of the item.
+            definition: The definition payload with ``parts`` array.
+            item_type: Optional Fabric item type for the URL path.
+        """
+        if item_type:
+            type_slug = self._item_type_to_slug(item_type)
+            url = f"{FABRIC_API_BASE}/workspaces/{workspace_id}/{type_slug}/{item_id}/updateDefinition"
+        else:
+            url = f"{FABRIC_API_BASE}/workspaces/{workspace_id}/items/{item_id}/updateDefinition"
+
+        return self._request("POST", url, body=definition, description=f"updateDefinition {item_id}")
+
+    @staticmethod
+    def _item_type_to_slug(item_type: str) -> str:
+        """
+        Convert a Fabric item type to the REST API URL slug.
+
+        E.g. "DataPipeline" → "dataPipelines", "Lakehouse" → "lakehouses"
+        """
+        slug_map = {
+            "DataPipeline": "dataPipelines",
+            "Notebook": "notebooks",
+            "Lakehouse": "lakehouses",
+            "Warehouse": "warehouses",
+            "SemanticModel": "semanticModels",
+            "Report": "reports",
+            "Eventhouse": "eventhouses",
+            "KQLDatabase": "kqlDatabases",
+            "Eventstream": "eventstreams",
+            "SQLEndpoint": "sqlEndpoints",
+            "SparkJobDefinition": "sparkJobDefinitions",
+            "DataflowGen2": "dataflowsGen2",
+            "MirroredDatabase": "mirroredDatabases",
+        }
+        return slug_map.get(item_type, f"{item_type[0].lower()}{item_type[1:]}s")
+
+    # ------------------------------------------------------------------
+    # Item discovery — find items by name across workspaces
+    # ------------------------------------------------------------------
+    def find_item_by_name(
+        self,
+        display_name: str,
+        workspace_id: Optional[str] = None,
+        item_type: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Find a Fabric item by its display name.
+
+        Searches within a single workspace (if workspace_id given) or across
+        all accessible workspaces. Returns the first match with full metadata
+        including workspace_id, item_id, displayName, type.
+
+        Args:
+            display_name: The display name to search for (case-insensitive).
+            workspace_id: Optional workspace GUID to search in.
+            item_type: Optional item type filter (e.g. "Lakehouse").
+
+        Returns:
+            Dict with item metadata, or None if not found.
+        """
+        name_lower = display_name.lower()
+
+        if workspace_id:
+            # Search in a specific workspace
+            result = self.list_items(workspace_id, item_type)
+            if result.success:
+                items = result.data if isinstance(result.data, list) else []
+                for item in items:
+                    if item.get("displayName", "").lower() == name_lower:
+                        item["workspace_id"] = workspace_id
+                        return item
+            return None
+
+        # Search across all accessible workspaces
+        ws_result = self.list_workspaces()
+        if not ws_result.success:
+            return None
+
+        workspaces = ws_result.data if isinstance(ws_result.data, list) else []
+        for ws in workspaces:
+            ws_id = ws.get("id", "")
+            result = self.list_items(ws_id, item_type)
+            if result.success:
+                items = result.data if isinstance(result.data, list) else []
+                for item in items:
+                    if item.get("displayName", "").lower() == name_lower:
+                        item["workspace_id"] = ws_id
+                        item["workspace_name"] = ws.get("displayName", "")
+                        return item
+
+        return None
+
+    def find_items_by_name(
+        self,
+        display_name: str,
+        item_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Find ALL Fabric items matching a display name across all workspaces.
+
+        Returns a list of matches (there may be duplicates across workspaces).
+        """
+        name_lower = display_name.lower()
+        matches: List[Dict[str, Any]] = []
+
+        ws_result = self.list_workspaces()
+        if not ws_result.success:
+            return matches
+
+        workspaces = ws_result.data if isinstance(ws_result.data, list) else []
+        for ws in workspaces:
+            ws_id = ws.get("id", "")
+            result = self.list_items(ws_id, item_type)
+            if result.success:
+                items = result.data if isinstance(result.data, list) else []
+                for item in items:
+                    if item.get("displayName", "").lower() == name_lower:
+                        item["workspace_id"] = ws_id
+                        item["workspace_name"] = ws.get("displayName", "")
+                        matches.append(item)
+
+        return matches
+
+    # ------------------------------------------------------------------
+    # Workspace role assignments (who has access?)
+    # ------------------------------------------------------------------
+    def get_workspace_role_assignments(self, workspace_id: str) -> RestResult:
+        """Get role assignments (access list) for a workspace."""
+        return self._paginated_get(
+            f"{FABRIC_API_BASE}/workspaces/{workspace_id}/roleAssignments",
+            description=f"get role assignments for workspace {workspace_id}",
+        )
+
+    # ------------------------------------------------------------------
     # Convenience: type-specific shortcuts
     # ------------------------------------------------------------------
     def create_lakehouse(

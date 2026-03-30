@@ -1,10 +1,33 @@
-﻿# Workspace Agent -- Few-Shot Examples
+﻿# Workspace Agent — Few-Shot Examples
 
-| # | User Request | Operation | CLI Command |
+| # | User Request | Operation | Method |
 |---|---|---|---|
-| 1 | "Create a Workspace called X" | create | `fab workspace create --display-name "X" --workspace-id "ws"` |
-| 2 | "List all Workspace items" | analyze | `fab workspace list --workspace-id "ws"` |
-| 3 | "Delete Workspace abc" | delete | `fab workspace delete --workspace-id "abc"` |
+| 1 | "List all workspaces" | analyze | REST: GET /workspaces |
+| 2 | "Who has access to DIG_FAB_MULTIAGENT?" | analyze (role_assignments) | REST: GET /workspaces/{id}/roleAssignments |
+| 3 | "List lakehouses in DIG_FAB_MULTIAGENT" | analyze (list_items) | REST: GET /workspaces/{id}/items?type=Lakehouse |
+| 4 | "Resolve workspace DIG_FAB_MULTIAGENT" | analyze (resolve_name) | REST: list → match name → return ID |
+
+## Analyze Mode Examples
+
+### List All Workspaces
+```json
+{"operation": "analyze", "params": {}}
+```
+
+### Role Assignments
+```json
+{"operation": "analyze", "params": {"role_assignments": true, "workspace_id": "DIG_FAB_MULTIAGENT"}}
+```
+
+### List Items by Type
+```json
+{"operation": "analyze", "params": {"list_items": true, "item_type": "Lakehouse", "workspace_id": "DIG_FAB_MULTIAGENT"}}
+```
+
+### Resolve Workspace Name
+```json
+{"operation": "analyze", "params": {"resolve_name": true, "workspace_name": "DIG_FAB_MULTIAGENT"}}
+```
 
 
 ---

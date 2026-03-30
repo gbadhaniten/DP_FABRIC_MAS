@@ -290,7 +290,19 @@ def _detect_agents(prompt: str, registry: AgentRegistry) -> List[str]:
 
 
 def _extract_params(prompt: str) -> Dict[str, Any]:
-    """Extract parameters from the prompt using pattern matching."""
+    """
+    Extract parameters from the prompt using pattern matching.
+
+    Handles:
+    - Quoted names: "MyItem" or 'MyItem'
+    - Workspace IDs: workspace abc-123
+    - Item IDs: item abc-123
+    - Named patterns: called X, named X
+    - Cross-workspace references:
+        "from WORKSPACE_A/ITEM_X to WORKSPACE_B/ITEM_Y"
+        "from ITEM_X in WORKSPACE_A to ITEM_Y in WORKSPACE_B"
+        "copy ITEM_X from WORKSPACE_A to ITEM_Y in WORKSPACE_B"
+    """
     params: Dict[str, Any] = {}
 
     # Extract quoted names
@@ -300,7 +312,7 @@ def _extract_params(prompt: str) -> Dict[str, Any]:
         if len(quoted) > 1:
             params["description"] = quoted[1]
 
-    # Extract workspace ID patterns
+    # Extract workspace ID patterns (GUIDs)
     ws_match = re.search(
         r'(?:workspace|ws)[\s_-]*(?:id)?[\s:=]*([a-f0-9-]{36}|[a-zA-Z0-9_-]+)',
         prompt, re.IGNORECASE,
@@ -323,6 +335,77 @@ def _extract_params(prompt: str) -> Dict[str, Any]:
     )
     if name_match and "display_name" not in params:
         params["display_name"] = name_match.group(1)
+
+    # ------------------------------------------------------------------
+    # Cross-workspace reference extraction
+    # Patterns:
+    #   "from WORKSPACE/ITEM to WORKSPACE/ITEM"
+    #   "from ITEM in WORKSPACE to ITEM in WORKSPACE"
+    #   "copy from WORKSPACE/ITEM to WORKSPACE/ITEM"
+    # ------------------------------------------------------------------
+    cross_ws_params = _extract_cross_workspace_refs(prompt)
+    if cross_ws_params:
+        params.update(cross_ws_params)
+
+    return params
+
+
+def _extract_cross_workspace_refs(prompt: str) -> Dict[str, Any]:
+    """
+    Extract cross-workspace source/sink references from a prompt.
+
+    Supports patterns like:
+    - "from WS_A/LH_X to WS_B/LH_Y"
+    - "from LH_X in WS_A to LH_Y in WS_B"
+    - "copy from WS_A/LH_X to WS_B/LH_Y"
+    - "from LH_MDM_SECURITY to LH_MDM" (same workspace, items only)
+
+    Returns dict with source_workspace, source_item, sink_workspace, sink_item.
+    """
+    params: Dict[str, Any] = {}
+
+    # Pattern 1: "from WORKSPACE/ITEM to WORKSPACE/ITEM"
+    #   e.g. "from DIGITEAM_FAB_SELFSERVICE_PUBLIC/LH_MDM_SECURITY to DIG_FAB_MULTIAGENT/LH_MDM"
+    slash_pattern = re.search(
+        r'from\s+([A-Za-z0-9_-]+)\s*/\s*([A-Za-z0-9_-]+)\s+'
+        r'to\s+([A-Za-z0-9_-]+)\s*/\s*([A-Za-z0-9_-]+)',
+        prompt, re.IGNORECASE,
+    )
+    if slash_pattern:
+        params["source_workspace"] = slash_pattern.group(1)
+        params["source_item"] = slash_pattern.group(2)
+        params["sink_workspace"] = slash_pattern.group(3)
+        params["sink_item"] = slash_pattern.group(4)
+        return params
+
+    # Pattern 2: "from ITEM in WORKSPACE to ITEM in WORKSPACE"
+    #   e.g. "from LH_MDM_SECURITY in DIGITEAM_FAB_SELFSERVICE_PUBLIC to LH_MDM in DIG_FAB_MULTIAGENT"
+    in_pattern = re.search(
+        r'from\s+([A-Za-z0-9_-]+)\s+in\s+([A-Za-z0-9_-]+)\s+'
+        r'to\s+([A-Za-z0-9_-]+)\s+in\s+([A-Za-z0-9_-]+)',
+        prompt, re.IGNORECASE,
+    )
+    if in_pattern:
+        params["source_item"] = in_pattern.group(1)
+        params["source_workspace"] = in_pattern.group(2)
+        params["sink_item"] = in_pattern.group(3)
+        params["sink_workspace"] = in_pattern.group(4)
+        return params
+
+    # Pattern 3: "from ITEM to ITEM" (same workspace — no workspace specified)
+    #   e.g. "from LH_MDM_SECURITY to LH_MDM"
+    simple_pattern = re.search(
+        r'from\s+([A-Za-z0-9_-]+)\s+to\s+([A-Za-z0-9_-]+)',
+        prompt, re.IGNORECASE,
+    )
+    if simple_pattern:
+        src = simple_pattern.group(1)
+        sink = simple_pattern.group(2)
+        # Filter out common noise words
+        noise = {"workspace", "lakehouse", "warehouse", "pipeline", "the", "a", "an"}
+        if src.lower() not in noise and sink.lower() not in noise:
+            params["source_item"] = src
+            params["sink_item"] = sink
 
     return params
 
@@ -414,6 +497,12 @@ class Orchestrator:
 
         GitHub Copilot handles the NLU layer via MCP tool descriptions.
         This planner handles the agent routing and parameter extraction.
+
+        Smart planning:
+        - If cross-workspace refs are detected (source/sink), automatically
+          generates a pipeline creation plan with Copy Activity configuration.
+        - Generates auto-names following naming convention if display_name
+          is not explicitly provided.
         """
         operation = _detect_operation(prompt)
         agents = _detect_agents(prompt, self.registry)
@@ -435,6 +524,20 @@ class Orchestrator:
         if self.workspace_id and "workspace_id" not in base_params:
             base_params["workspace_id"] = self.workspace_id
 
+        # ------------------------------------------------------------------
+        # Smart planning: pipeline with copy activity (cross-workspace)
+        # ------------------------------------------------------------------
+        has_source_sink = "source_item" in base_params and "sink_item" in base_params
+        is_pipeline_op = "data_pipeline" in agents or "datapipeline" in agents
+
+        if has_source_sink and (is_pipeline_op or operation == "create"):
+            plan = self._plan_pipeline_with_copy(prompt, base_params, agents, operation)
+            if plan:
+                return plan
+
+        # ------------------------------------------------------------------
+        # Standard planning (single operation per agent)
+        # ------------------------------------------------------------------
         for i, agent_key in enumerate(agents, start=1):
             step_params = dict(base_params)
             agent_cls = self.registry.get(agent_key)
@@ -458,6 +561,85 @@ class Orchestrator:
                 "planner": "keyword-routing",
                 "detected_operation": operation,
                 "detected_agents": agents,
+            },
+        )
+
+    def _plan_pipeline_with_copy(
+        self,
+        prompt: str,
+        params: Dict[str, Any],
+        agents: List[str],
+        operation: str,
+    ) -> Optional[ExecutionPlan]:
+        """
+        Generate a smart execution plan for creating a pipeline with Copy Activity.
+
+        When the prompt contains cross-workspace source/sink references,
+        this method builds a plan that:
+        1. Creates the pipeline
+        2. Auto-configures the Copy Activity with resolved source/sink
+
+        Auto-generates a pipeline name from source/sink names if not provided.
+        """
+        source_item = params.get("source_item", "")
+        sink_item = params.get("sink_item", "")
+        source_workspace = params.get("source_workspace")
+        sink_workspace = params.get("sink_workspace")
+
+        # Auto-generate pipeline name if not provided
+        display_name = params.get("display_name")
+        if not display_name:
+            # Generate: PL_COPY_<SOURCE>_TO_<SINK>
+            src_short = source_item.replace("LH_", "").replace("WH_", "")
+            sink_short = sink_item.replace("LH_", "").replace("WH_", "")
+            display_name = f"PL_COPY_{src_short}_TO_{sink_short}"
+            params["display_name"] = display_name
+
+        # Build pipeline creation params including source/sink config
+        pipeline_params = {
+            "display_name": display_name,
+            "workspace_id": params.get("workspace_id", self.workspace_id),
+            "description": params.get(
+                "description",
+                f"Copy data from {source_item} to {sink_item}",
+            ),
+            "source_workspace": source_workspace,
+            "source_item": source_item,
+            "sink_workspace": sink_workspace,
+            "sink_item": sink_item,
+            "source_type": params.get("source_type", "Lakehouse"),
+            "sink_type": params.get("sink_type", "Lakehouse"),
+        }
+
+        steps = [
+            TaskStep(
+                step_number=1,
+                agent_key="datapipeline",
+                operation="create",
+                params=pipeline_params,
+                description=(
+                    f"Create pipeline '{display_name}' with Copy Activity: "
+                    f"{source_item} → {sink_item}"
+                ),
+            ),
+        ]
+
+        return ExecutionPlan(
+            prompt=prompt,
+            steps=steps,
+            metadata={
+                "planner": "smart-pipeline-copy",
+                "detected_operation": operation,
+                "detected_agents": agents,
+                "cross_workspace": True,
+                "source": {
+                    "item": source_item,
+                    "workspace": source_workspace,
+                },
+                "sink": {
+                    "item": sink_item,
+                    "workspace": sink_workspace,
+                },
             },
         )
 
