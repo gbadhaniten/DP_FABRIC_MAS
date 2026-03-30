@@ -3,7 +3,8 @@ base_agent.py — Abstract Base Agent for Fabric-MAS
 ====================================================
 Every Fabric item agent inherits from this class.
 Provides the canonical five operations, autotrain hooks,
-and automatic loading of per-agent knowledge files (.md).
+automatic loading of per-agent knowledge files (.md),
+and **naming convention enforcement** from Naming_Convention.md.
 
 Folder convention (one item = one agent = one folder):
     fabric_mas/agents/<agent-name>/
@@ -19,11 +20,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fabric_mas.core.cli_wrapper import FabricCLI
 from fabric_mas.tools.search_tool import SearchTool
@@ -180,6 +182,217 @@ class AgentKnowledge:
 
 
 # ---------------------------------------------------------------------------
+# Naming Convention — loaded from Naming_Convention.md at project root
+# ---------------------------------------------------------------------------
+@dataclass
+class NamingValidationResult:
+    """Result of a naming convention check."""
+    valid: bool
+    original_name: str
+    corrected_name: str
+    prefix: str
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+    def __str__(self) -> str:
+        if self.valid:
+            return f"✅ Name '{self.original_name}' is valid"
+        return (
+            f"⚠️ Name '{self.original_name}' violates naming convention. "
+            f"Suggested: '{self.corrected_name}'. Issues: {'; '.join(self.errors)}"
+        )
+
+
+class NamingConvention:
+    """
+    Loads and enforces naming conventions from Naming_Convention.md.
+
+    The file contains a YAML-like ``validation:`` block that maps each
+    Fabric item type to its required prefix.  This class:
+    1. Parses those prefixes at load time.
+    2. Validates any proposed ``display_name`` against the rules.
+    3. Can auto-correct names (add prefix, fix casing, replace invalid chars).
+
+    The file is re-read every time an agent is constructed, so edits to
+    ``Naming_Convention.md`` take effect immediately.
+    """
+
+    _MAX_LENGTH = 80
+    _ALLOWED_PATTERN = re.compile(r"^[A-Z0-9_]+$")
+
+    def __init__(self, convention_file: Optional[Path] = None):
+        self._prefixes: Dict[str, str] = {}
+        self._raw_content: str = ""
+        self._file_path = convention_file or self._default_path()
+        self._load()
+
+    @staticmethod
+    def _default_path() -> Path:
+        """Naming_Convention.md lives at the project root."""
+        return Path(__file__).resolve().parent.parent.parent / "Naming_Convention.md"
+
+    def _load(self) -> None:
+        """Parse the validation block from Naming_Convention.md."""
+        if not self._file_path.exists():
+            logger.debug("Naming convention file not found: %s", self._file_path)
+            return
+
+        try:
+            self._raw_content = self._file_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            logger.warning("Could not read naming convention file: %s", exc)
+            return
+
+        # Parse the YAML-like validation block:
+        #   validation:
+        #     Lakehouse: "LH_"
+        #     Warehouse: "WH_"
+        in_validation = False
+        for line in self._raw_content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("validation:"):
+                in_validation = True
+                continue
+            if in_validation:
+                if stripped == "" or stripped.startswith("```") or stripped.startswith("#") or stripped.startswith("---"):
+                    if self._prefixes:  # stop after block ends
+                        break
+                    continue
+                # Parse lines like:  Lakehouse: "LH_"
+                match = re.match(r'^(\w+):\s*["\']?([A-Z_]+)["\']?\s*$', stripped)
+                if match:
+                    item_type = match.group(1)
+                    prefix = match.group(2)
+                    self._prefixes[item_type] = prefix
+
+        if self._prefixes:
+            logger.debug(
+                "Loaded naming conventions for %d item types", len(self._prefixes)
+            )
+        else:
+            logger.debug("No naming prefixes found in %s", self._file_path)
+
+    @property
+    def loaded(self) -> bool:
+        return bool(self._prefixes)
+
+    @property
+    def content(self) -> str:
+        """Full raw content of the naming convention file."""
+        return self._raw_content
+
+    def get_prefix(self, item_type: str) -> Optional[str]:
+        """
+        Get the required prefix for an item type.
+
+        Tries exact match first, then case-insensitive, then partial match.
+        """
+        # Exact match
+        if item_type in self._prefixes:
+            return self._prefixes[item_type]
+        # Case-insensitive
+        lower = item_type.lower()
+        for k, v in self._prefixes.items():
+            if k.lower() == lower:
+                return v
+        # Partial (e.g. "Lakehouse" matches "Lakehouse")
+        for k, v in self._prefixes.items():
+            if lower in k.lower() or k.lower() in lower:
+                return v
+        return None
+
+    def validate(self, display_name: str, item_type: str) -> NamingValidationResult:
+        """
+        Validate a display_name against the naming convention.
+
+        Returns a NamingValidationResult with:
+        - valid: True if name passes all checks
+        - corrected_name: auto-corrected version if invalid
+        - errors: list of specific violations found
+        """
+        errors: List[str] = []
+        warnings: List[str] = []
+        prefix = self.get_prefix(item_type) or ""
+
+        if not self.loaded:
+            return NamingValidationResult(
+                valid=True,
+                original_name=display_name,
+                corrected_name=display_name,
+                prefix=prefix,
+                warnings=["Naming convention file not loaded — skipping validation"],
+            )
+
+        original = display_name
+        name = display_name.strip()
+
+        # Rule 1: Convert to UPPER_SNAKE_CASE
+        corrected = name.upper().replace(" ", "_").replace("-", "_")
+        # Remove consecutive underscores
+        corrected = re.sub(r"_+", "_", corrected)
+        # Remove leading/trailing underscores
+        corrected = corrected.strip("_")
+
+        if corrected != name.upper().strip():
+            errors.append(
+                f"Must be UPPER_SNAKE_CASE (no spaces/hyphens, A-Z 0-9 _ only)"
+            )
+
+        # Rule 2: Check allowed characters
+        if not self._ALLOWED_PATTERN.match(corrected):
+            # Remove disallowed characters
+            corrected = re.sub(r"[^A-Z0-9_]", "", corrected)
+            errors.append("Contains disallowed characters (only A-Z, 0-9, _ allowed)")
+
+        # Rule 3: Check prefix
+        if prefix and not corrected.startswith(prefix):
+            corrected = prefix + corrected
+            errors.append(
+                f"Missing required prefix '{prefix}' for {item_type}"
+            )
+
+        # Rule 4: Check length
+        if len(corrected) > self._MAX_LENGTH:
+            corrected = corrected[: self._MAX_LENGTH]
+            warnings.append(
+                f"Name exceeds {self._MAX_LENGTH} chars — truncated"
+            )
+
+        valid = len(errors) == 0
+        return NamingValidationResult(
+            valid=valid,
+            original_name=original,
+            corrected_name=corrected,
+            prefix=prefix,
+            errors=errors,
+            warnings=warnings,
+        )
+
+    def suggest_name(self, item_type: str, *parts: str) -> str:
+        """
+        Generate a convention-compliant name from parts.
+
+        Example:
+            suggest_name("Lakehouse", "Sales", "Bronze") → "LH_SALES_BRONZE"
+        """
+        prefix = self.get_prefix(item_type) or ""
+        clean_parts = []
+        for p in parts:
+            cleaned = p.upper().replace(" ", "_").replace("-", "_")
+            cleaned = re.sub(r"[^A-Z0-9_]", "", cleaned)
+            cleaned = cleaned.strip("_")
+            if cleaned:
+                clean_parts.append(cleaned)
+        name = prefix + "_".join(clean_parts)
+        name = re.sub(r"_+", "_", name)
+        return name[: self._MAX_LENGTH]
+
+    def get_all_prefixes(self) -> Dict[str, str]:
+        """Return all item type → prefix mappings."""
+        return dict(self._prefixes)
+
+
+# ---------------------------------------------------------------------------
 # Base Agent
 # ---------------------------------------------------------------------------
 class BaseAgent(ABC):
@@ -218,11 +431,16 @@ class BaseAgent(ABC):
 
         # ── Load knowledge from agent folder ──
         self.knowledge = self._load_knowledge()
+
+        # ── Load naming convention (shared across all agents) ──
+        self.naming = NamingConvention()
+
         logger.info(
-            "Agent ready: %s [%s] — knowledge: %s",
+            "Agent ready: %s [%s] — knowledge: %s, naming: %s",
             self.ITEM_TYPE,
             self.ITEM_CODE,
             "✓ loaded" if self.knowledge.has_knowledge else "○ empty",
+            "✓ loaded" if self.naming.loaded else "○ not found",
         )
 
     # ------------------------------------------------------------------
@@ -410,6 +628,52 @@ class BaseAgent(ABC):
         )
 
     # ------------------------------------------------------------------
+    # Naming convention enforcement
+    # ------------------------------------------------------------------
+    def validate_and_fix_name(
+        self, params: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], NamingValidationResult]:
+        """
+        Validate and auto-correct ``display_name`` in params against
+        the naming convention for this agent's ITEM_TYPE.
+
+        Returns:
+            (updated_params, validation_result)
+
+        If the name violates the convention, ``display_name`` is replaced
+        with the corrected version and a log message is emitted.
+        """
+        display_name = params.get("display_name", "")
+        if not display_name:
+            result = NamingValidationResult(
+                valid=True,
+                original_name="",
+                corrected_name="",
+                prefix="",
+            )
+            return params, result
+
+        result = self.naming.validate(display_name, self.ITEM_TYPE)
+
+        if not result.valid:
+            logger.warning(
+                "⚠️ Naming convention violation for %s: '%s' → '%s' | %s",
+                self.ITEM_TYPE,
+                result.original_name,
+                result.corrected_name,
+                "; ".join(result.errors),
+            )
+            # Auto-correct the name in params
+            params = dict(params)  # shallow copy to avoid mutating original
+            params["display_name"] = result.corrected_name
+
+        if result.warnings:
+            for w in result.warnings:
+                logger.info("📏 Naming note: %s", w)
+
+        return params, result
+
+    # ------------------------------------------------------------------
     # Canonical operations (override in subclasses)
     # ------------------------------------------------------------------
     @abstractmethod
@@ -457,6 +721,17 @@ class BaseAgent(ABC):
                 f"Unknown operation '{operation}' for {self.ITEM_TYPE}",
             )
         self._autotrain(operation)
+
+        # ── Naming convention enforcement on CREATE ──
+        if operation == "create" and "display_name" in params:
+            params, naming_result = self.validate_and_fix_name(params)
+            if not naming_result.valid:
+                logger.info(
+                    "📏 Auto-corrected name: '%s' → '%s'",
+                    naming_result.original_name,
+                    naming_result.corrected_name,
+                )
+
         if operation == "create":
             return handler(params)
         elif operation == "update":

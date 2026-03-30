@@ -340,8 +340,69 @@ def get_system_status() -> str:
             "update_agent_knowledge",
             "visualize_workflow",
             "get_system_status",
+            "check_naming_convention",
         ],
     }, indent=2)
+
+
+@mcp.tool()
+def check_naming_convention(
+    display_name: str,
+    item_type: str,
+) -> str:
+    """
+    Validate a proposed display name against the Fabric naming convention.
+    Returns whether the name is valid, any violations, and a corrected name.
+
+    The naming convention is defined in Naming_Convention.md and enforces:
+    - UPPER_SNAKE_CASE (e.g. LH_SALES_BRONZE)
+    - Required prefix per item type (e.g. LH_ for Lakehouse, WH_ for Warehouse)
+    - Only A-Z, 0-9, underscore allowed
+    - Max 80 characters
+
+    This check runs automatically on every create operation, but you can
+    also call it manually to preview how a name will be validated.
+
+    Args:
+        display_name: The proposed name to validate (e.g. "my-lakehouse").
+        item_type:    Fabric item type (e.g. "Lakehouse", "Notebook", "Warehouse",
+                      "DataPipeline", "SemanticModel", etc.).
+
+    Returns:
+        JSON with validation result: valid, corrected_name, prefix, errors, warnings.
+    """
+    from fabric_mas.core.base_agent import NamingConvention
+
+    nc = NamingConvention()
+    if not nc.loaded:
+        return json.dumps({
+            "error": "Naming_Convention.md not found or has no validation block.",
+            "suggestion": "Create Naming_Convention.md at the project root.",
+        })
+
+    result = nc.validate(display_name, item_type)
+    response = {
+        "valid": result.valid,
+        "original_name": result.original_name,
+        "corrected_name": result.corrected_name,
+        "prefix": result.prefix,
+        "item_type": item_type,
+        "errors": result.errors,
+        "warnings": result.warnings,
+    }
+
+    if not result.valid:
+        response["message"] = (
+            f"Name '{result.original_name}' violates naming convention. "
+            f"Suggested: '{result.corrected_name}'"
+        )
+    else:
+        response["message"] = f"Name '{result.original_name}' is valid ✅"
+
+    # Also include all available prefixes for reference
+    response["all_prefixes"] = nc.get_all_prefixes()
+
+    return json.dumps(response, indent=2)
 
 
 # ---------------------------------------------------------------------------
