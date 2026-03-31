@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fabric_mas.core.cli_wrapper import FabricCLI
 from fabric_mas.tools.search_tool import SearchTool
+from fabric_mas.tools.telemetry_emitter import emit_event, emit_step_start
 
 logger = logging.getLogger(__name__)
 
@@ -839,6 +840,7 @@ class BaseAgent(ABC):
     # ------------------------------------------------------------------
     def execute(self, operation: str, params: Dict[str, Any]) -> AgentResult:
         """Generic dispatcher invoked by the orchestrator."""
+        params = dict(params)
         op_map = {
             "create": self.create,
             "update": self.update,
@@ -855,45 +857,87 @@ class BaseAgent(ABC):
 
         handler = op_map.get(operation)
 
+        # Telemetry: mark step start
+        emit_step_start(
+            params.get("job_id", "unknown"),
+            f"{self.ITEM_CODE}_{operation}"
+        )
+
+        error = None
+
         # For REST-only operations, route through _run_rest directly
         if operation in rest_ops:
             rest_result = self._run_rest(operation, params)
             if rest_result is not None:
-                return rest_result
-            return self._make_result(
-                OperationType.ANALYZE, False,
-                f"Operation '{operation}' requires REST client (not available)",
-            )
-
-        if handler is None:
-            return self._make_result(
+                result = rest_result
+            else:
+                result = self._make_result(
+                    OperationType.ANALYZE, False,
+                    f"Operation '{operation}' requires REST client (not available)",
+                )
+        elif handler is None:
+            result = self._make_result(
                 OperationType.CREATE,
                 False,
                 f"Unknown operation '{operation}' for {self.ITEM_TYPE}",
             )
-        self._autotrain(operation)
+        else:
+            try:
+                self._autotrain(operation)
 
-        # ── Naming convention enforcement on CREATE ──
-        if operation == "create" and "display_name" in params:
-            params, naming_result = self.validate_and_fix_name(params)
-            if not naming_result.valid:
-                logger.info(
-                    "📏 Auto-corrected name: '%s' → '%s'",
-                    naming_result.original_name,
-                    naming_result.corrected_name,
+                # ── Naming convention enforcement on CREATE ──
+                if operation == "create" and "display_name" in params:
+                    params, naming_result = self.validate_and_fix_name(params)
+                    if not naming_result.valid:
+                        logger.info(
+                            "📏 Auto-corrected name: '%s' → '%s'",
+                            naming_result.original_name,
+                            naming_result.corrected_name,
+                        )
+
+                if operation == "create":
+                    result = handler(params)
+                elif operation == "update":
+                    result = handler(params.pop("item_id", ""), params)
+                elif operation == "delete":
+                    result = handler(params.get("item_id", ""))
+                elif operation == "analyze":
+                    result = handler(**params)
+                elif operation == "deploy":
+                    result = handler(params.pop("item_id", ""), params.pop("target", ""), **params)
+                else:
+                    result = handler(params)
+            except Exception as exc:
+                error = exc
+                result = self._make_result(
+                    OperationType.CREATE,
+                    False,
+                    f"{self.ITEM_TYPE} {operation} failed: {exc}",
+                    errors=[str(exc)],
                 )
 
-        if operation == "create":
-            return handler(params)
-        elif operation == "update":
-            return handler(params.pop("item_id", ""), params)
-        elif operation == "delete":
-            return handler(params.get("item_id", ""))
-        elif operation == "analyze":
-            return handler(**params)
-        elif operation == "deploy":
-            return handler(params.pop("item_id", ""), params.pop("target", ""), **params)
-        return handler(params)
+        success = result.success
+
+        # Telemetry: emit step result
+        emit_event(
+            job_id=params.get("job_id", "unknown"),
+            job_name=params.get("job_name", self.__class__.__name__),
+            agent=self.ITEM_CODE.lower().replace("_", "-"),
+            operation=operation,
+            cli_command=getattr(self, "_last_command", ""),
+            status="ok" if success else "fail",
+            tokens=params.get("_tokens", 0),
+            detail=str(result)[:200],
+            workspace=params.get("workspace", ""),
+            item_name=params.get("display_name", params.get("item_name", "")),
+            item_type=self.ITEM_TYPE,
+            source_workspace=params.get("source_workspace", ""),
+            source_item=params.get("source_item", ""),
+            error_message=str(error)[:200] if not success and error is not None else "",
+            step_key=f"{self.ITEM_CODE}_{operation}",
+        )
+
+        return result
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} [{self.ITEM_CODE}] ws={self.workspace_id}>"

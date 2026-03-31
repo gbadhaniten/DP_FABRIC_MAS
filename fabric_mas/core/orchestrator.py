@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
@@ -26,6 +27,7 @@ from typing import Any, Dict, List, Optional, Type
 from fabric_mas.core.base_agent import AgentResult, BaseAgent, OperationType
 from fabric_mas.core.cli_wrapper import FabricCLI
 from fabric_mas.tools.search_tool import SearchTool
+from fabric_mas.tools.telemetry_emitter import emit_job_start, emit_job_end
 
 logger = logging.getLogger(__name__)
 
@@ -85,12 +87,49 @@ class AgentRegistry:
     def register(self, agent_cls: Type[BaseAgent], *aliases: str) -> None:
         key = agent_cls.ITEM_TYPE.lower().replace(" ", "_")
         self._agents[key] = agent_cls
+
+        # CamelCase → snake_case alias for ITEM_TYPE
+        # Handles acronyms: "PowerBIApp" → "power_bi_app", "SQLDatabase" → "sql_database"
+        # Two-pass: (1) ABCDef → ABC_Def, (2) abcDef → abc_Def
+        s1 = re.sub(r"([A-Z]+)([A-Z][a-z0-9])", r"\1_\2", agent_cls.ITEM_TYPE)
+        snake = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+        if snake != key:
+            self._aliases[snake] = key
+
         if agent_cls.ITEM_CODE:
             self._aliases[agent_cls.ITEM_CODE.lower()] = key
         if agent_cls.FAB_NOUN:
-            self._aliases[agent_cls.FAB_NOUN.lower()] = key
+            # Store both raw and normalised forms so lookups always work
+            raw = agent_cls.FAB_NOUN.lower()
+            normalised = raw.replace("-", "_").replace(" ", "_")
+            self._aliases[raw] = key
+            if normalised != raw:
+                self._aliases[normalised] = key
         if agent_cls.AGENT_FOLDER_NAME:
-            self._aliases[agent_cls.AGENT_FOLDER_NAME.lower()] = key
+            raw = agent_cls.AGENT_FOLDER_NAME.lower()
+            normalised = raw.replace("-", "_").replace(" ", "_")
+            self._aliases[raw] = key
+            if normalised != raw:
+                self._aliases[normalised] = key
+            # Also store folder name without the '-agent' suffix as a natural alias
+            # e.g. "git-integration-agent" -> "git-integration" and "git_integration"
+            stripped = raw
+            if stripped.endswith("-agent"):
+                stripped = stripped[:-6]
+            elif stripped.endswith("_agent"):
+                stripped = stripped[:-6]
+            if stripped and stripped != raw:
+                self._aliases[stripped] = key
+                stripped_norm = stripped.replace("-", "_").replace(" ", "_")
+                if stripped_norm != stripped:
+                    self._aliases[stripped_norm] = key
+        extra_aliases = getattr(agent_cls, "ALIASES", []) or []
+        for alias in extra_aliases:
+            raw = str(alias).lower()
+            normalised = raw.replace("-", "_").replace(" ", "_")
+            self._aliases[raw] = key
+            if normalised != raw:
+                self._aliases[normalised] = key
         for alias in aliases:
             self._aliases[alias.lower()] = key
         logger.debug("Registered: %s (%s)", key, agent_cls.ITEM_CODE)
@@ -102,10 +141,7 @@ class AgentRegistry:
         resolved = self._aliases.get(k)
         if resolved:
             return self._agents.get(resolved)
-        # Try partial match
-        for alias, agent_key in self._aliases.items():
-            if k in alias or alias in k:
-                return self._agents.get(agent_key)
+        # No partial matching — avoids false positives (e.g. "cop" in "aicopilot")
         return None
 
     def list_agents(self) -> List[str]:
@@ -171,7 +207,7 @@ AGENT_KEYWORDS: Dict[str, List[str]] = {
     "onelake": ["onelake", "one lake", "adls", "data lake storage"],
     "shortcut": ["shortcut", "link", "symlink", "pointer"],
     "notebook": ["notebook", "nb", "jupyter", "script", "etl notebook", "pyspark"],
-    "environment": ["environment", "env", "runtime", "spark config", "library"],
+
     "spark_job_definition": ["spark job", "spark definition", "sjd", "batch job"],
     "data_pipeline": [
         "pipeline", "data pipeline", "etl pipeline", "orchestration pipeline",
@@ -185,12 +221,9 @@ AGENT_KEYWORDS: Dict[str, List[str]] = {
     "sql_endpoint": ["sql endpoint", "sql analytics", "lakehouse sql"],
     "sql_database": ["sql database", "sql db"],
     "mirrored_database": ["mirrored", "mirror database", "mirrored db", "db mirror"],
-    "kql_database": ["kql database", "kql db", "kusto database", "kusto"],
-    "eventhouse": ["eventhouse", "event house", "event store"],
-    "eventstream": ["eventstream", "event stream", "streaming", "real-time ingest"],
+
     "kql_queryset": ["kql query", "kql queryset", "kusto query"],
-    "real-time_hub": ["realtime hub", "real-time hub", "real time hub"],
-    "real-time_dashboard": ["realtime dashboard", "real-time dashboard", "live dashboard"],
+
     "data_activator": ["data activator", "activator", "trigger", "alert"],
     "reflex": ["reflex", "reactive", "reflex trigger"],
     "semantic_model": [
@@ -199,7 +232,7 @@ AGENT_KEYWORDS: Dict[str, List[str]] = {
     "report": ["report", "power bi report", "pbi report", "paginated report"],
     "dashboard": ["dashboard", "power bi dashboard", "pbi dashboard"],
     "power_bi_app": ["powerbi app", "power bi app", "pbi app"],
-    "organizational_app": ["org app", "organizational app", "template app"],
+
     "map_visual": ["map visual", "arcgis", "geographic"],
     "workspace": ["workspace", "ws", "project space", "fabric workspace"],
     "capacity": ["capacity", "sku", "compute", "f64", "f32", "f16", "f2"],
@@ -209,24 +242,26 @@ AGENT_KEYWORDS: Dict[str, List[str]] = {
     ],
     "git_integration": ["git", "github", "devops", "version control", "source control"],
     "lineage": ["lineage", "data lineage", "impact analysis", "dependency"],
-    "sensitivity_label": [
-        "sensitivity", "label", "classification", "information protection",
+    "monitoring": [
+        "monitoring", "observability", "health", "diagnostics", "job history",
+        "failed jobs", "refresh history", "capacity metrics", "platform health",
     ],
+
     "variable_library": ["variable", "variable library", "parameter", "config variable"],
     "task_flow": ["task flow", "taskflow", "dag"],
     "security": [
         "security", "rls", "row level security", "ols", "role", "permission",
         "rbac", "access control",
     ],
-    "fabric_iq": ["fabric iq", "ai assistant"],
+
     "data_agent": ["data agent", "autonomous agent"],
     "copilot": ["copilot settings", "copilot config"],
     "graphql_api": ["graphql", "api endpoint", "graphql api"],
-    "user-defined_function": ["udf", "user defined function", "custom function"],
+    "user_data_functions": ["udf", "user defined function", "custom function", "user data function"],
     "ai_functions": ["ai function", "ai functions", "ml function"],
     "ontology": ["ontology", "knowledge graph", "semantic layer"],
     "data_wrangler": ["data wrangler", "wrangler", "data prep", "data preparation"],
-    "operations": ["operations", "monitoring", "admin", "ops", "fabric operations"],
+
     "data_modeling": [
         "data model", "dimension model", "fact table", "dimension table",
         "star schema", "snowflake schema", "scd", "slowly changing",
@@ -708,6 +743,8 @@ class Orchestrator:
                     message=f"No agent registered for '{step.agent_key}'",
                 )
             else:
+                step.params["job_id"] = getattr(self, "_current_job_id", "unknown")
+                step.params["job_name"] = getattr(self, "_current_job_name", "")
                 result = agent.execute(step.operation, step.params)
                 # ── Auto-learning: log prompt → agent's examples.md ──
                 try:
@@ -771,6 +808,16 @@ class Orchestrator:
     # ------------------------------------------------------------------
     def execute_task(self, prompt: str) -> Dict[str, Any]:
         """End-to-end: prompt → plan → execute → structured result."""
+        job_id = str(uuid.uuid4())[:8]
+        job_name = prompt[:60].strip()
+        extracted_params = _extract_params(prompt)
+        workspace = extracted_params.get("workspace", extracted_params.get("workspace_id", ""))
+
+        self._current_job_id = job_id
+        self._current_job_name = job_name
+
+        emit_job_start(job_id, job_name, prompt, workspace)
+
         logger.info("═══ New task ═══\n%s", prompt)
 
         # Check if prompt is a JSON plan from Copilot
@@ -781,13 +828,18 @@ class Orchestrator:
             plan = self.plan(stripped)
 
         if not plan.steps:
-            return {
+            result = {
                 "success": False,
                 "message": "Could not produce an execution plan. "
                            + plan.metadata.get("suggestion", ""),
                 "plan": plan.to_dict(),
                 "results": [],
             }
+            status = "fail"
+            total_tokens = 0
+            summary = result["message"]
+            emit_job_end(job_id, job_name, status, total_tokens, summary)
+            return result
         results = self.execute_plan(plan)
         all_ok = all(r.success for r in results)
 
@@ -802,7 +854,7 @@ class Orchestrator:
         except Exception as exc:
             logger.debug("Workflow visualizer skipped: %s", exc)
 
-        return {
+        result = {
             "success": all_ok,
             "message": (
                 f"Executed {len(results)} step(s) — "
@@ -812,6 +864,11 @@ class Orchestrator:
             "results": [r.to_dict() for r in results],
             "workflow_html": html_path,
         }
+        status = "done" if all_ok else "partial"
+        total_tokens = 0
+        summary = result["message"]
+        emit_job_end(job_id, job_name, status, total_tokens, summary)
+        return result
 
     # ------------------------------------------------------------------
     # Orchestrator-level prompt logging (writes to orchestrator-agent/)

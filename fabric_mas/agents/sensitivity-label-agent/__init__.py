@@ -1,2 +1,0 @@
-﻿from fabric_mas.agents.sensitivity_label_agent.agent import SensitivityLabelAgent
-

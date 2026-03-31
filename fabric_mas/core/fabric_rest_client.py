@@ -459,6 +459,23 @@ class FabricRestClient:
             elapsed = round(time.monotonic() - start, 2)
             return RestResult(False, 0, None, str(exc), elapsed)
 
+    def request(
+        self,
+        method: str,
+        url: str,
+        json_body: Optional[Dict] = None,
+        description: str = "",
+    ) -> RestResult:
+        """
+        Public request wrapper.
+
+        Accepts either a full Fabric API URL or a relative path beginning with `/`.
+        This is useful for agents that need REST endpoints not yet modelled as
+        dedicated helper methods.
+        """
+        resolved_url = url if url.startswith("http") else f"{FABRIC_API_BASE}{url}"
+        return self._request(method, resolved_url, body=json_body, description=description)
+
     def _extract_error(self, data: Any, status_code: int) -> str:
         """Extract a human-readable error message from API response."""
         if isinstance(data, dict):
@@ -679,9 +696,6 @@ class FabricRestClient:
             "Warehouse": "warehouses",
             "SemanticModel": "semanticModels",
             "Report": "reports",
-            "Eventhouse": "eventhouses",
-            "KQLDatabase": "kqlDatabases",
-            "Eventstream": "eventstreams",
             "SQLEndpoint": "sqlEndpoints",
             "SparkJobDefinition": "sparkJobDefinitions",
             "DataflowGen2": "dataflowsGen2",

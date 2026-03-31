@@ -65,7 +65,14 @@ Open Copilot Chat (`Ctrl+Shift+I`) and type any Fabric request naturally.
 | 2 | Run `python setup_wizard.py` | All 7 steps show ✅ |
 | 3 | `fab auth login` | `fab auth status` shows authenticated |
 | 4 | Open VS Code → MCP: List Servers | `fabric-mas` with 8 tools |
-| 5 | Copilot Chat → "List all Fabric agents" | Returns 49 agents |
+| 5 | Copilot Chat → "List all Fabric agents" | Returns 31 agents |
+
+### Step 6: Start the live dashboard server
+```powershell
+python mas_log_server.py
+```
+Then open `fabric_mas_visualiser.html` in your browser.
+The dashboard auto-refreshes every 5 seconds and shows all agent activity in real time.
 
 > **Requirements:** Python 3.10+, VS Code 1.96+, GitHub Copilot licence (active), Fabric CLI.
 
@@ -229,7 +236,7 @@ FABRIC_DRY_RUN=true
 │  Fabric-MAS MCP Server           │
 │  8 tools for Fabric management   │
 │  Keyword-based routing           │
-│  49 specialized agents           │
+│  31 specialized agents           │
 └──────────┬───────────────────────┘
            │ Executes via fab CLI
            ▼
@@ -269,7 +276,7 @@ Copilot: [Uses execute_fabric_task tool] → Routes to lakehouse-agent → Execu
 
 ```
 You: "Show me all available Fabric agents"
-Copilot: [Uses list_available_agents tool] → Returns 49 agents
+Copilot: [Uses list_available_agents tool] → Returns 31 agents
 ```
 
 ```
@@ -297,7 +304,7 @@ User sends prompt via Copilot
     │
 Copilot calls MCP tool → _get_orchestrator() creates singleton
     │
-orch.auto_register() scans agents/*/ folders → 49 agents registered
+orch.auto_register() scans agents/*/ folders → 31 agents registered
     │
 Keyword planner identifies agents from prompt → Creates execution plan
     │
@@ -325,7 +332,6 @@ The keyword planner (or Copilot via `run_fabric_agent`) decides which agents to 
 
 ```
 "Create a lakehouse"       → lakehouse-agent
-"Set up real-time alerts"  → eventhouse + eventstream + data-activator
 "Build a star schema"      → data-modeling-agent
 "Deploy to production"     → deployment-pipeline-agent
 ```
@@ -352,7 +358,7 @@ Input: agent_key="lakehouse", operation="create", params={"display_name": "Bronz
 ```
 
 ### Tool 3: `list_available_agents`
-Returns all 49 registered agents with types, codes, and operations.
+Returns all 31 registered agents with types, codes, and operations.
 
 ### Tool 4: `search_fabric_docs`
 Searches Microsoft Fabric documentation via Tavily/Bing.
@@ -403,20 +409,12 @@ and 'd_' prefix for dimensions instead of 'Fact_' and 'Dim_'"
 Agent: data-modeling-agent → Updates instructions.md with custom conventions
 ```
 
-### ⚡ Real-Time Intelligence Setup
-```
-Prompt: "Set up real-time analytics with eventhouse, eventstream,
-KQL database, and live dashboard"
-
-Agents: eventhouse + eventstream + kql-database + realtime-dashboard
-```
-
 ### 🔐 Workspace Governance
 ```
 Prompt: "Create workspace Finance-Prod, assign F64 capacity,
-configure admin roles, apply Confidential labels"
+configure admin roles"
 
-Agents: workspace + capacity + security + sensitivity-label
+Agents: workspace + capacity + security
 ```
 
 ---
@@ -447,7 +445,7 @@ that file changes all future model generations.
 
 ## Agent Knowledge System
 
-Each of the 49 agents has co-located knowledge files:
+Each of the 31 agents has co-located knowledge files:
 
 ```
 agents/lakehouse-agent/

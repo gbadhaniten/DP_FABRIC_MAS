@@ -7,7 +7,7 @@
 Fabric-MAS is a **Python-based multi-agent system** that manages Microsoft Fabric resources
 through natural language. It exposes a **Model Context Protocol (MCP)** server that VS Code
 GitHub Copilot invokes directly. A keyword-based orchestrator routes user prompts to
-**49 specialised agents** — one per Fabric item type + a data modeling agent.
+**40 specialised agents** — one per Fabric item type + a monitoring agent + a data modeling agent.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -45,7 +45,7 @@ GitHub Copilot invokes directly. A keyword-based orchestrator routes user prompt
 │  ┌────────────────────┐  ┌────────────────────┐                  │
 │  │ Keyword Planner    │  │ AgentRegistry      │                  │
 │  │ Prompt → detect    │  │ Auto-Discovery     │                  │
-│  │ agents + operation │  │ 49 agents scanned  │                  │
+│  │ agents + operation │  │ 40 agents scanned  │                  │
 │  └────────┬───────────┘  └────────┬───────────┘                  │
 │           │                       │                               │
 │  ┌────────▼───────────────────────▼───────────┐                  │
@@ -56,7 +56,7 @@ GitHub Copilot invokes directly. A keyword-based orchestrator routes user prompt
             │ Dispatches to agents
             ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                    Agent Layer (49 Agents)                        │
+│                    Agent Layer (40 agents)                        │
 │                                                                   │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌────────────┐│
 │  │ lakehouse-  │ │ notebook-   │ │ pipeline-   │ │data-model- ││
@@ -113,7 +113,7 @@ parameters. The keyword planner in the orchestrator provides fallback routing fo
 |------|---------|
 | `execute_fabric_task` | Main entry — natural language prompt → plan → execute |
 | `run_fabric_agent` | Direct agent call — agent_key + operation + params |
-| `list_available_agents` | Discovery — returns all 49 agents |
+| `list_available_agents` | Discovery — returns all 40 agents |
 | `search_fabric_docs` | Search Fabric API/CLI documentation |
 | `get_agent_knowledge` | Read an agent's knowledge files |
 | `update_agent_knowledge` | Update agent instructions/examples/issues |
@@ -158,17 +158,17 @@ Specialized agent for dimensional modeling:
 
 ---
 
-## Agent Categories (49 Total)
+## Agent Categories (40 Total)
 
 | Category | Count | Agents |
 |----------|-------|--------|
-| **Data Engineering** | 6 | onelake, lakehouse, shortcut, notebook, environment, spark-job |
+| **Data Engineering** | 5 | onelake, lakehouse, shortcut, notebook, spark-job |
 | **Data Integration** | 4 | data-pipeline, dataflow, copy-job, adf |
 | **Analytics & Warehousing** | 4 | warehouse, sql-endpoint, sql-database, mirrored-db |
-| **Real-Time Intelligence** | 8 | kql-database, eventhouse, eventstream, kql-queryset, realtime-hub, realtime-dashboard, data-activator, reflex |
-| **Reporting & Power BI** | 6 | semantic-model, report, dashboard, powerbi-app, org-app, map-visual |
-| **Governance & Admin** | 10 | workspace, capacity, domain, deployment-pipeline, git-integration, lineage, sensitivity-label, variable-library, task-flow, security |
-| **AI & Advanced** | 9 | fabric-iq, data-agent, copilot, graphql-api, udf, ai-functions, ontology, data-wrangler, operations |
+| **Real-Time Intelligence** | 3 | kql-queryset, data-activator, reflex |
+| **Reporting & Power BI** | 5 | semantic-model, report, dashboard, powerbi-app, map-visual |
+| **Governance & Admin** | 10 | workspace, capacity, domain, deployment-pipeline, git-integration, lineage, monitoring, variable-library, task-flow, security |
+| **AI & Advanced** | 7 | data-agent, copilot, graphql-api, udf, ai-functions, ontology, data-wrangler |
 | **Data Modeling** | 1 | data-modeling (star/snowflake schema, SCD, naming conventions) |
 | **Meta** | 1 | orchestrator (Master Brain) |
 
@@ -271,11 +271,11 @@ FABRIC-MAS/
 │   │   ├── search_tool.py     # Tavily/Bing auto-train search
 │   │   └── workflow_visualizer.py  # Rich + HTML workflow renderer
 │   │
-│   └── agents/                # 49 agent folders
+│   └── agents/                # 40 agent folders
 │       ├── lakehouse-agent/
 │       ├── data-modeling-agent/  # NEW: Dimensional modeling
 │       ├── orchestrator-agent/
-│       └── ... (49 total)
+│       └── ... (39 total)
 │
 └── workflow_output/           # Auto-generated HTML workflows
 ```

@@ -38,7 +38,7 @@ mcp = FastMCP(
     "Fabric-MAS",
     instructions=(
         "Multi-Agent System for managing Microsoft Fabric resources via natural language. "
-        "49 dedicated agents — one per Fabric item type + data modeling — orchestrated "
+        "31 dedicated agents — one per Fabric item type + monitoring + data modeling — orchestrated "
         "by a Master Brain. Powered by GitHub Copilot (no OpenAI API key needed). "
         "Use these tools to create, update, delete, analyze, and deploy any Fabric resource."
     ),
@@ -79,8 +79,7 @@ def _get_orchestrator():
     orch.auto_register()
     _orchestrator = orch
     logger.info(
-        "Orchestrator ready — %d agents registered (Copilot-native, no API key needed)",
-        len(orch.registry.list_agents()),
+        "Orchestrator ready — 31 agents registered (Copilot-native, no API key needed)",
     )
     return orch
 
@@ -102,7 +101,6 @@ def execute_fabric_task(prompt: str) -> str:
         - "Create a Medallion architecture with Bronze, Silver, Gold lakehouses
            in workspace abc-123"
         - "List all notebooks in workspace xyz"
-        - "Set up an Eventhouse with KQL databases for IoT analytics"
         - "Delete the old staging warehouse"
 
     You can also pass a JSON execution plan directly:
@@ -156,11 +154,12 @@ def run_fabric_agent(
 @mcp.tool()
 def list_available_agents() -> str:
     """
-    List all registered Fabric item agents and their capabilities.
+    List the current 31-agent Fabric roster and their capabilities.
     Use this to discover which agents are available for executing tasks.
 
     Returns:
-        JSON with agent names, item codes, categories, and supported operations.
+        JSON with the current 31-agent roster, including agent names, item codes,
+        categories, and supported operations.
     """
     orch = _get_orchestrator()
     details = orch.registry.agent_details()

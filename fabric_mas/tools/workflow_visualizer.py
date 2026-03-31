@@ -58,14 +58,14 @@ CATEGORY_COLORS = {
 
 def _agent_category(agent_key: str) -> str:
     """Guess the category from the agent key for colour coding."""
-    de = {"onelake", "lakehouse", "shortcut", "notebook", "environment", "spark_job"}
+    de = {"onelake", "lakehouse", "shortcut", "notebook", "spark_job"}
     di = {"data_pipeline", "dataflow", "copy_job", "adf"}
     an = {"warehouse", "sql_endpoint", "sql_database", "mirrored_db"}
-    rt = {"kql_database", "eventhouse", "eventstream", "kql_queryset",
-          "realtime_hub", "realtime_dashboard", "data_activator", "reflex"}
-    rp = {"semantic_model", "report", "dashboard", "powerbi_app", "org_app", "map_visual"}
+    rt = {"kql_queryset",
+          "data_activator", "reflex"}
+    rp = {"semantic_model", "report", "dashboard", "powerbi_app", "map_visual"}
     go = {"workspace", "capacity", "domain", "deployment_pipeline", "git_integration",
-          "lineage", "sensitivity_label", "variable_library", "task_flow", "security"}
+          "lineage", "monitoring", "variable_library", "task_flow", "security"}
     k = agent_key.lower().replace("-", "_")
     if k in de: return "data_engineering"
     if k in di: return "data_integration"

@@ -171,42 +171,9 @@ Design a dimensional model for customer analytics, generate SQL, then create it 
 
 ---
 
-## ⚡ Real-Time Intelligence
-
-### Complete RTI Setup
+### KQL Queries
 ```
-Set up a complete real-time analytics stack: eventhouse, eventstream, KQL database, and dashboard
-Create a real-time pipeline for IoT telemetry with alerting
-```
-
-### Eventhouse
-```
-Create an Eventhouse for IoT sensor telemetry data
-Update Eventhouse scaling to handle 100K events/second
-Analyze Eventhouse storage consumption and retention
-```
-
-### Eventstream
-```
-Create an Eventstream from Azure Event Hub for order events
-Create an Eventstream from IoT Hub with JSON parsing
-Update Eventstream to add a KQL Database destination
-Analyze Eventstream throughput, latency, and error rates
-```
-
-### KQL Database & Queries
-```
-Create a KQL database linked to the IoT Eventhouse
 Create a KQL Queryset for anomaly detection on temperature readings
-Update KQL database retention policy from 30 to 90 days
-Analyze KQL database ingestion rate and data volume
-```
-
-### Real-Time Dashboard
-```
-Create a real-time dashboard for live IoT monitoring
-Update dashboard to add a new KQL visual for error rates
-Analyze dashboard refresh frequency and viewer count
 ```
 
 ### Data Activator & Reflex
@@ -296,11 +263,9 @@ Analyze git sync status — are there conflicts?
 Update git branch from feature/etl-update to main
 ```
 
-### Domains & Labels
+### Domains
 ```
 Create a domain called "Finance Analytics" and assign workspaces
-Apply "Highly Confidential" sensitivity label to financial reports
-Analyze sensitivity label coverage — what percentage of items are labeled?
 Update domain endorsement to "Promoted" for the Gold workspace
 ```
 
@@ -316,12 +281,10 @@ Find all items that depend on the CustomerDim table
 
 ## 🤖 AI & Advanced Features
 
-### Fabric IQ & Copilot
+### Copilot
 ```
-Ask Fabric IQ for optimization recommendations for this workspace
 Enable Copilot for the Analytics workspace
 Analyze Copilot usage patterns — what are users asking most?
-Use Fabric IQ to troubleshoot slow warehouse queries
 ```
 
 ### GraphQL API
@@ -357,18 +320,11 @@ ETL notebooks for each layer, a daily pipeline, a semantic model,
 and a Power BI report — all in workspace ws-data-prod
 ```
 
-### Real-Time Intelligence with Alerting
-```
-Set up IoT monitoring: create an eventhouse, eventstream from IoT Hub,
-KQL database with 90-day retention, a real-time dashboard, and a
-Data Activator alert for temperature > 80°C
-```
-
 ### Workspace Governance Setup
 ```
 Create workspace Finance-Prod with F64 capacity, set up admin and
-viewer security roles, connect to Azure DevOps git repo, create a
-Dev-Test-Prod deployment pipeline, and apply Confidential sensitivity labels
+viewer security roles, connect to Azure DevOps git repo, and create a
+Dev-Test-Prod deployment pipeline
 ```
 
 ### Migration from Dev to Prod
@@ -389,7 +345,6 @@ List all failed pipeline runs in the last 7 days
 Show data lineage for the Executive Dashboard
 Audit who has admin access across all production workspaces
 Compare item counts between Dev and Prod workspaces
-Check which items don't have sensitivity labels applied
 ```
 
 ---
@@ -400,7 +355,6 @@ Check which items don't have sensitivity labels applied
 Delete the deprecated staging lakehouse and its shortcuts
 Remove the old test notebooks from the Dev workspace
 Delete the unused deployment pipeline called "OldPipeline"
-Clean up orphaned eventstreams that aren't connected to any destination
 ```
 
 ---

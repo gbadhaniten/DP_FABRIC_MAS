@@ -34,41 +34,41 @@
 
 ---
 
-## Example 2: Set Up a Real-Time Analytics Pipeline
+## Example 2: Set Up Workspace Governance
 
 **User Prompt:**
-> I need a real-time analytics setup with an eventhouse, eventstream, and a KQL dashboard in workspace ws-rt-456
+> Set up workspace Finance-Prod with F64 capacity, admin roles, and connect to DevOps
 
 **Expected Plan:**
 ```json
 {
   "steps": [
     {
-      "agent_key": "eventhouse",
+      "agent_key": "workspace",
       "operation": "create",
-      "params": {"display_name": "RTAnalyticsEventhouse", "workspace_id": "ws-rt-456"},
-      "description": "Create Eventhouse for real-time data storage"
+      "params": {"display_name": "Finance-Prod"},
+      "description": "Create Finance-Prod workspace"
     },
     {
-      "agent_key": "eventstream",
-      "operation": "create",
-      "params": {"display_name": "RTAnalyticsStream", "workspace_id": "ws-rt-456"},
-      "description": "Create Eventstream to ingest real-time events"
+      "agent_key": "capacity",
+      "operation": "assign",
+      "params": {"workspace_id": "{{step1.result.id}}", "sku": "F64"},
+      "description": "Assign F64 capacity to workspace"
     },
     {
-      "agent_key": "kql_database",
-      "operation": "create",
-      "params": {"display_name": "RTAnalyticsKQL", "workspace_id": "ws-rt-456", "eventhouse_id": "{{step1.result.id}}"},
-      "description": "Create KQL Database linked to the Eventhouse"
+      "agent_key": "security",
+      "operation": "assign",
+      "params": {"workspace_id": "{{step1.result.id}}", "role": "Admin", "group": "IT Team"},
+      "description": "Configure admin RBAC roles"
     },
     {
-      "agent_key": "realtime_dashboard",
-      "operation": "create",
-      "params": {"display_name": "RTDashboard", "workspace_id": "ws-rt-456"},
-      "description": "Create Real-Time Dashboard for live monitoring"
+      "agent_key": "git_integration",
+      "operation": "connect",
+      "params": {"workspace_id": "{{step1.result.id}}", "repo": "AzureDevOps"},
+      "description": "Connect workspace to DevOps repository"
     }
   ],
-  "metadata": {"assumptions": ["Eventstream will be configured to route events to the KQL Database"]}
+  "metadata": {"assumptions": ["F64 capacity is available in the tenant"]}
 }
 ```
 
@@ -186,6 +186,24 @@
 **Prompt:** Create a Lakehouse called MDM in workspace DIG_FAB_MULTIAGENT
 
 **Agents Used:** lakehouse
+
+**Steps:** 1 | **Succeeded:** 1 | **Failed:** 0
+
+---
+
+### 2026-03-31 07:41 UTC — ORCHESTRATION [✅ All Succeeded]
+**Prompt:** {"steps": [{"agent_key": "dummy", "operation": "create", "params": {"display_name": "demo_item"}, "description": "Create dummy"}], "metadata": {}}
+
+**Agents Used:** dummy
+
+**Steps:** 1 | **Succeeded:** 1 | **Failed:** 0
+
+---
+
+### 2026-03-31 07:41 UTC — ORCHESTRATION [✅ All Succeeded]
+**Prompt:** {"steps": [{"agent_key": "dummy", "operation": "create", "params": {"display_name": "demo_item"}, "description": "Create dummy"}], "metadata": {}}
+
+**Agents Used:** dummy
 
 **Steps:** 1 | **Succeeded:** 1 | **Failed:** 0
 

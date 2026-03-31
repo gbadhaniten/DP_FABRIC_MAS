@@ -53,10 +53,9 @@ Use this knowledge to make better routing decisions and avoid known pitfalls.
 ## Multi-Step Workflows
 Common patterns:
 1. **Medallion Architecture** → lakehouse-agent (Bronze → Silver → Gold) → notebook-agent → data-pipeline-agent
-2. **Real-Time Pipeline** → eventhouse-agent → eventstream-agent → kql-database-agent → realtime-dashboard-agent
-3. **Report Deployment** → semantic-model-agent → report-agent → deployment-pipeline-agent
-4. **Workspace Setup** → workspace-agent → capacity-agent → environment-agent → security-agent
-5. **Cross-Workspace Copy** → data-pipeline-agent.create(source/sink params) → auto-resolves items → builds Copy Activity
+2. **Report Deployment** → semantic-model-agent → report-agent → deployment-pipeline-agent
+3. **Workspace Setup** → workspace-agent → capacity-agent → security-agent
+4. **Cross-Workspace Copy** → data-pipeline-agent.create(source/sink params) → auto-resolves items → builds Copy Activity
 
 ## Cross-Workspace Parameter Extraction
 The orchestrator detects these patterns:

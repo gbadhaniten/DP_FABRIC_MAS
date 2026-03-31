@@ -32,11 +32,6 @@
          │                       │
          ▼                       ▼
 ┌──────────────────────────────────────────┐
-│ environment-agent                         │
-│ CREATE Spark env (pandas, numpy, etc.)    │
-└────────┬─────────────────────────────────┘
-         ▼
-┌──────────────────────────────────────────┐
 │ data-pipeline-agent                       │
 │ CREATE DailyETL pipeline with schedule    │
 └──────────────────────────────────────────┘
@@ -47,57 +42,11 @@
 2. `lakehouse-agent` × 3 → create Bronze, Silver, Gold lakehouses
 3. `shortcut-agent` → create source data shortcut (ADLS, S3, etc.)
 4. `notebook-agent` × 2 → create ETL notebooks per layer
-5. `environment-agent` → create Spark environment with libraries
-6. `data-pipeline-agent` → create orchestration pipeline with schedule
+5. `data-pipeline-agent` → create orchestration pipeline with schedule
 
 ---
 
-## 2. Real-Time Intelligence Pipeline
-
-**Goal:** Set up live data ingestion, analytics, dashboards, and alerts.
-
-```
-┌──────────────────┐
-│ eventhouse-agent  │ ──▶ CREATE Eventhouse
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│ kql-database-     │ ──▶ CREATE KQL DB inside Eventhouse
-│ agent             │
-└────────┬─────────┘
-         ▼
-┌──────────────────┐
-│ eventstream-agent │ ──▶ CREATE Eventstream (IoT Hub / Event Hub source)
-│                   │     Route to KQL Database destination
-└────────┬─────────┘
-         ▼
-┌──────────────────┐    ┌──────────────────┐
-│ kql-queryset-     │    │ realtime-         │
-│ agent             │    │ dashboard-agent   │
-│ Saved queries for │    │ Live monitoring   │
-│ anomaly detection │    │ dashboard         │
-└────────┬─────────┘    └────────┬─────────┘
-         │                       │
-         ▼                       ▼
-┌──────────────────┐    ┌──────────────────┐
-│ data-activator-   │    │ reflex-agent      │
-│ agent             │    │ Email/Teams alert  │
-│ Trigger: CPU >90% │    │ on threshold       │
-└──────────────────┘    └──────────────────┘
-```
-
-**Agent Sequence:**
-1. `eventhouse-agent` → create Eventhouse
-2. `kql-database-agent` → create KQL Database linked to Eventhouse
-3. `eventstream-agent` → create Eventstream with source + KQL destination
-4. `kql-queryset-agent` → create monitoring queries
-5. `realtime-dashboard-agent` → create live dashboard
-6. `data-activator-agent` → create alert triggers
-7. `reflex-agent` → configure notification actions
-
----
-
-## 3. Workspace Governance & Security
+## 2. Workspace Governance & Security
 
 **Goal:** Set up a governed workspace with RBAC, git, CI/CD, and compliance.
 
@@ -114,13 +63,13 @@
          │ Assign F64        │    │ Create domain     │
          └────────┬─────────┘    └────────┬─────────┘
                   ▼                       ▼
-         ┌──────────────────┐    ┌──────────────────┐
-         │ security-agent    │    │ sensitivity-      │
-         │ RBAC roles:       │    │ label-agent       │
-         │ Admin, Contrib,   │    │ Apply Confidential│
-         │ Viewer            │    │ labels            │
-         └────────┬─────────┘    └────────┬─────────┘
-                  ▼                       ▼
+         ┌──────────────────┐
+         │ security-agent    │
+         │ RBAC roles:       │
+         │ Admin, Contrib,   │
+         │ Viewer            │
+         └────────┬─────────┘
+                  ▼
          ┌──────────────────┐    ┌──────────────────┐
          │ git-integration-  │    │ deployment-       │
          │ agent             │    │ pipeline-agent    │
@@ -133,13 +82,12 @@
 2. `capacity-agent` → assign capacity to production
 3. `domain-agent` → create business domain and assign workspaces
 4. `security-agent` → configure RBAC roles per workspace
-5. `sensitivity-label-agent` → apply data classification labels
-6. `git-integration-agent` → connect workspace to git repository
-7. `deployment-pipeline-agent` → create CI/CD pipeline across stages
+5. `git-integration-agent` → connect workspace to git repository
+6. `deployment-pipeline-agent` → create CI/CD pipeline across stages
 
 ---
 
-## 4. Power BI Report Deployment
+## 3. Power BI Report Deployment
 
 **Goal:** Build and deploy analytics reports from a semantic model.
 
@@ -175,7 +123,7 @@
 
 ---
 
-## 5. Data Integration from External Sources
+## 4. Data Integration from External Sources
 
 **Goal:** Ingest data from external databases into Fabric.
 
@@ -213,7 +161,7 @@
 
 ---
 
-## 6. AI & Advanced Analytics
+## 5. AI & Advanced Analytics
 
 **Goal:** Set up AI-powered features and natural-language querying.
 
@@ -229,11 +177,11 @@
 └────────┬─────────┘    └────────┬─────────┘
          │                       │
          ▼                       ▼
-┌──────────────────┐    ┌──────────────────┐
-│ copilot-agent     │    │ fabric-iq-agent   │
-│ Enable Copilot    │    │ Optimization      │
-│ for workspace     │    │ recommendations   │
-└──────────────────┘    └──────────────────┘
+┌──────────────────┐
+│ copilot-agent     │
+│ Enable Copilot    │
+│ for workspace     │
+└──────────────────┘
 ```
 
 **Agent Sequence:**
@@ -241,29 +189,25 @@
 2. `data-agent-agent` → create natural-language query agent
 3. `ai-functions-agent` → deploy ML model functions
 4. `copilot-agent` → enable Copilot features
-5. `fabric-iq-agent` → get optimization recommendations
 
 ---
 
-## 7. Audit & Compliance Analysis
+## 6. Audit & Compliance Analysis
 
-**Goal:** Inspect workspace health, lineage, and compliance.
+**Goal:** Inspect workspace health and lineage.
 
 ```
 ┌──────────────────┐
 │ workspace-agent   │ ──▶ ANALYZE all items in workspace
 └────────┬─────────┘
          ▼
-┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│ lineage-agent     │    │ operations-agent  │    │ sensitivity-      │
-│ Trace data flow   │    │ Audit failed ops  │    │ label-agent       │
-│ end-to-end        │    │ and run history   │    │ Check label       │
-│                   │    │                   │    │ compliance        │
-└──────────────────┘    └──────────────────┘    └──────────────────┘
+┌──────────────────┐
+│ lineage-agent     │
+│ Trace data flow   │
+│ end-to-end        │
+└──────────────────┘
 ```
 
 **Agent Sequence:**
 1. `workspace-agent` → list and analyse all items
 2. `lineage-agent` → trace data flow from source to report
-3. `operations-agent` → audit operation log for failures
-4. `sensitivity-label-agent` → check compliance coverage
