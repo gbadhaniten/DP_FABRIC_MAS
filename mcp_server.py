@@ -143,7 +143,12 @@ def run_fabric_agent(
     """
     orch = _get_orchestrator()
     try:
-        parsed_params = json.loads(params) if isinstance(params, str) else params
+        if isinstance(params, dict):
+            parsed_params = params
+        elif isinstance(params, str):
+            parsed_params = json.loads(params) if params.strip() else {}
+        else:
+            parsed_params = {}
     except json.JSONDecodeError:
         parsed_params = {}
 

@@ -554,6 +554,7 @@ class Orchestrator:
 
         steps: List[TaskStep] = []
         base_params = _extract_params(prompt)
+        base_params["_raw_prompt"] = prompt  # carry original prompt for pattern detection
 
         # Inject default workspace if not in prompt
         if self.workspace_id and "workspace_id" not in base_params:
@@ -644,12 +645,19 @@ class Orchestrator:
             "sink_item": sink_item,
             "source_type": params.get("source_type", "Lakehouse"),
             "sink_type": params.get("sink_type", "Lakehouse"),
+            # When "all tables" language is detected, use ForEach pattern
+            "activity_pattern": (
+                "foreach_copy_all_tables"
+                if any(kw in params.get("_raw_prompt", "").lower()
+                       for kw in ("all tables", "all table", "foreach", "for each", "for-each"))
+                else params.get("activity_pattern", "")
+            ),
         }
 
         steps = [
             TaskStep(
                 step_number=1,
-                agent_key="datapipeline",
+                agent_key="data_pipeline",
                 operation="create",
                 params=pipeline_params,
                 description=(
@@ -788,7 +796,27 @@ class Orchestrator:
         if self.workspace_id and "workspace_id" not in params:
             params["workspace_id"] = self.workspace_id
 
+        # Ensure telemetry has a job context even for direct calls
+        if "job_id" not in params:
+            direct_job_id = str(uuid.uuid4())[:8]
+            direct_job_name = f"{operation}:{agent_key}"
+            params["job_id"] = direct_job_id
+            params["job_name"] = direct_job_name
+            self._current_job_id = direct_job_id
+            self._current_job_name = direct_job_name
+            emit_job_start(direct_job_id, direct_job_name, f"[Direct] {operation} {agent_key}", "")
+
         result = agent.execute(operation, params)
+
+        # Emit job_end for direct calls that opened their own job context
+        if params.get("job_id") == getattr(self, "_current_job_id", None):
+            emit_job_end(
+                params["job_id"],
+                params.get("job_name", ""),
+                "done" if result.success else "fail",
+                0,
+                result.message,
+            )
 
         # Auto-learning
         try:

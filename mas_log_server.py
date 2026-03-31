@@ -18,8 +18,10 @@ import csv
 import os
 import time
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, parse_qs
+
+STALE_JOB_MINUTES = 10  # jobs still "running" after this many minutes are marked abandoned
 
 LOG_FILE = "mas_activity_log.csv"
 PORT = 7842
@@ -93,6 +95,21 @@ def append_event(event: dict):
             job["ended_at"] = event.get("timestamp", datetime.now(timezone.utc).isoformat())
         elif event.get("status") == "fail":
             job["status"] = "failed"
+
+        # ── Stale-job reaper ────────────────────────────────────────────────
+        # Any job still "running" after STALE_JOB_MINUTES is marked abandoned.
+        # This prevents orphaned entries when a process crashes before job_end.
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=STALE_JOB_MINUTES)
+        for stale_jid, stale_job in store["jobs"].items():
+            if stale_job["status"] != "running":
+                continue
+            try:
+                started = datetime.fromisoformat(stale_job["started_at"])
+                if started < cutoff:
+                    stale_job["status"] = "abandoned"
+                    stale_job["ended_at"] = datetime.now(timezone.utc).isoformat()
+            except (ValueError, KeyError):
+                pass  # unparseable timestamp — leave as-is
 
     append_csv(event)
 

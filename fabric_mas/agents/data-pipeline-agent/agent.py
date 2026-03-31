@@ -127,6 +127,152 @@ class DataPipelineAgent(BaseAgent):
         return activity
 
     @staticmethod
+    def build_foreach_copy_all_tables(
+        source_workspace_id: str,
+        source_lakehouse_id: str,
+        sink_workspace_id: str,
+        sink_lakehouse_id: str,
+        table_action: str = "Overwrite",
+    ) -> List[Dict[str, Any]]:
+        """
+        Build a GetMetadata → ForEach → CopyActivity chain that dynamically
+        copies every table from the source Lakehouse to the sink Lakehouse.
+
+        Activity flow:
+            1. GetTableList  — GetMetadata on source Lakehouse, returns childItems
+            2. ForEach_Table — iterates @activity('GetTableList').output.childItems
+               └── CopyActivity — copies @item().name table from source → sink
+
+        Args:
+            source_workspace_id: GUID of the source workspace.
+            source_lakehouse_id: GUID of the source Lakehouse item.
+            sink_workspace_id:   GUID of the sink workspace.
+            sink_lakehouse_id:   GUID of the sink Lakehouse item.
+            table_action:        Sink table action (default: Overwrite).
+
+        Returns:
+            List of top-level activity dicts ready for build_pipeline_definition().
+        """
+
+        def _lakehouse_ref(ws_id: str, item_id: str) -> Dict:
+            return {
+                "type": "Lakehouse",
+                "typeProperties": {
+                    "workspaceId": ws_id,
+                    "artifactId": item_id,
+                    "rootFolder": "Tables",
+                },
+            }
+
+        get_metadata = {
+            "name": "GetTableList",
+            "type": "GetMetadata",
+            "dependsOn": [],
+            "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": False,
+                "secureOutput": False,
+            },
+            "typeProperties": {
+                "dataset": {
+                    "type": "LakehouseTable",
+                    "typeProperties": {
+                        "table": "*",
+                    },
+                    "linkedService": {
+                        "properties": _lakehouse_ref(source_workspace_id, source_lakehouse_id),
+                    },
+                    "externalReferences": {
+                        "connection": "builtin",
+                    },
+                },
+                "fieldList": ["childItems"],
+                "storeSettings": {
+                    "type": "LakehouseReadSettings",
+                    "recursive": True,
+                    "enablePartitionDiscovery": False,
+                },
+            },
+        }
+
+        copy_activity_inner = {
+            "name": "CopyActivity",
+            "type": "Copy",
+            "dependsOn": [],
+            "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": False,
+                "secureOutput": False,
+            },
+            "typeProperties": {
+                "source": {
+                    "type": "LakehouseTableSource",
+                    "datasetSettings": {
+                        "type": "LakehouseTable",
+                        "typeProperties": {
+                            "table": {
+                                "value": "@item().name",
+                                "type": "Expression",
+                            },
+                        },
+                        "linkedService": {
+                            "properties": _lakehouse_ref(source_workspace_id, source_lakehouse_id),
+                        },
+                        "externalReferences": {
+                            "connection": "builtin",
+                        },
+                    },
+                },
+                "sink": {
+                    "type": "LakehouseTableSink",
+                    "tableActionOption": table_action,
+                    "datasetSettings": {
+                        "type": "LakehouseTable",
+                        "typeProperties": {
+                            "table": {
+                                "value": "@item().name",
+                                "type": "Expression",
+                            },
+                        },
+                        "linkedService": {
+                            "properties": _lakehouse_ref(sink_workspace_id, sink_lakehouse_id),
+                        },
+                        "externalReferences": {
+                            "connection": "builtin",
+                        },
+                    },
+                },
+                "enableStaging": False,
+            },
+        }
+
+        foreach_activity = {
+            "name": "ForEach_Table",
+            "type": "ForEach",
+            "dependsOn": [
+                {
+                    "activity": "GetTableList",
+                    "dependencyConditions": ["Succeeded"],
+                }
+            ],
+            "typeProperties": {
+                "items": {
+                    "value": "@activity('GetTableList').output.childItems",
+                    "type": "Expression",
+                },
+                "isSequential": False,
+                "batchCount": 10,
+                "activities": [copy_activity_inner],
+            },
+        }
+
+        return [get_metadata, foreach_activity]
+
+    @staticmethod
     def build_pipeline_definition(
         activities: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
@@ -214,6 +360,24 @@ class DataPipelineAgent(BaseAgent):
         display_name = params.get("display_name", "Untitled_DataPipeline")
         description = params.get("description", "")
 
+        # ── Normalise key aliases so callers can use either naming style ──
+        # source_lakehouse_name / source_lakehouse → source_item
+        # sink_lakehouse_name   / sink_lakehouse   → sink_item
+        if not params.get("source_item"):
+            params["source_item"] = (
+                params.get("source_lakehouse_name")
+                or params.get("source_lakehouse")
+            )
+        if not params.get("sink_item"):
+            params["sink_item"] = (
+                params.get("sink_lakehouse_name")
+                or params.get("sink_lakehouse")
+            )
+        if not params.get("source_workspace") and params.get("source_workspace_id"):
+            params["source_workspace"] = params["source_workspace_id"]
+        if not params.get("sink_workspace") and params.get("sink_workspace_id"):
+            params["sink_workspace"] = params["sink_workspace_id"]
+
         # ── Step 1: Create the pipeline shell via REST ──
         rest_result = self._run_rest("create", params)
         if rest_result is not None and rest_result.success:
@@ -221,26 +385,39 @@ class DataPipelineAgent(BaseAgent):
             pipeline_id = pipeline_data.get("id", "")
             ws = self._resolve_workspace(params.get("workspace_id"))
 
-            # ── Step 2: If source/sink specified, add Copy Activity ──
             source_item_name = params.get("source_item")
             sink_item_name = params.get("sink_item")
+            activity_pattern = params.get("activity_pattern", "")
 
             if source_item_name and sink_item_name and pipeline_id:
-                copy_result = self._configure_copy_activity(
-                    pipeline_id=pipeline_id,
-                    workspace_id=ws,
-                    params=params,
-                )
+                # ── ForEach / all-tables pattern ──────────────────────────
+                if activity_pattern == "foreach_copy_all_tables":
+                    copy_result = self._configure_foreach_copy_all_tables(
+                        pipeline_id=pipeline_id,
+                        workspace_id=ws,
+                        params=params,
+                    )
+                else:
+                    # ── Single Copy Activity (original behaviour) ─────────
+                    copy_result = self._configure_copy_activity(
+                        pipeline_id=pipeline_id,
+                        workspace_id=ws,
+                        params=params,
+                    )
+
                 if copy_result and copy_result.success:
                     rest_result.message = (
-                        f"DataPipeline '{display_name}' created with Copy Activity "
-                        f"({source_item_name} → {sink_item_name})"
+                        f"DataPipeline '{display_name}' created with "
+                        + ("ForEach + Copy Activity" if activity_pattern == "foreach_copy_all_tables"
+                           else "Copy Activity")
+                        + f" ({source_item_name} → {sink_item_name})"
                     )
                     rest_result.data["copy_activity"] = "configured"
                 else:
                     rest_result.message = (
-                        f"DataPipeline '{display_name}' created but Copy Activity "
-                        f"configuration failed: {copy_result.message if copy_result else 'unknown error'}"
+                        f"DataPipeline '{display_name}' created but activity "
+                        f"configuration failed: "
+                        f"{copy_result.message if copy_result else 'unknown error'}"
                     )
                     rest_result.data["copy_activity"] = "failed"
             else:
@@ -350,6 +527,99 @@ class DataPipelineAgent(BaseAgent):
                         "id": sink.get("id"),
                         "workspace_id": sink.get("workspace_id"),
                     },
+                },
+            )
+        else:
+            return self._make_result(
+                OperationType.CREATE, False,
+                f"Failed to update pipeline definition: {result.error}",
+                errors=[result.error],
+            )
+
+    def _configure_foreach_copy_all_tables(
+        self,
+        pipeline_id: str,
+        workspace_id: str,
+        params: Dict[str, Any],
+    ) -> Optional[AgentResult]:
+        """
+        Configure a GetMetadata → ForEach → CopyActivity chain on an existing
+        pipeline that dynamically copies ALL tables from source to sink Lakehouse.
+
+        Resolves source and sink Lakehouses by name (cross-workspace), builds
+        the activities, and calls updateDefinition API.
+        """
+        source_workspace = params.get("source_workspace")
+        source_item_name = params.get("source_item", "")
+        sink_workspace = params.get("sink_workspace")
+        sink_item_name = params.get("sink_item", "")
+        table_action = params.get("table_action", "Overwrite")
+
+        # Allow direct ID pass-through to avoid redundant REST lookups
+        source_lakehouse_id = params.get("source_lakehouse_id") or params.get("source_item_id")
+        sink_lakehouse_id = (
+            params.get("sink_lakehouse_id")
+            or params.get("sink_item_id")
+        )
+        source_ws_id = params.get("source_workspace_id") or source_workspace
+        sink_ws_id = params.get("sink_workspace_id") or sink_workspace or workspace_id
+
+        # Resolve source item if ID not provided
+        if not source_lakehouse_id:
+            source = self._resolve_item(source_item_name, source_workspace, "Lakehouse")
+            if not source:
+                return self._make_result(
+                    OperationType.CREATE, False,
+                    f"Source Lakehouse '{source_item_name}' not found"
+                    + (f" in workspace '{source_workspace}'" if source_workspace else ""),
+                )
+            source_lakehouse_id = source.get("id", "")
+            source_ws_id = source.get("workspace_id", source_ws_id)
+
+        # Resolve sink item if ID not provided
+        if not sink_lakehouse_id:
+            sink = self._resolve_item(sink_item_name, sink_workspace, "Lakehouse")
+            if not sink:
+                return self._make_result(
+                    OperationType.CREATE, False,
+                    f"Sink Lakehouse '{sink_item_name}' not found"
+                    + (f" in workspace '{sink_workspace}'" if sink_workspace else ""),
+                )
+            sink_lakehouse_id = sink.get("id", "")
+            sink_ws_id = sink.get("workspace_id", sink_ws_id)
+
+        logger.info(
+            "ForEach copy: source=%s/%s → sink=%s/%s (action=%s)",
+            source_ws_id, source_lakehouse_id,
+            sink_ws_id, sink_lakehouse_id,
+            table_action,
+        )
+
+        # Build GetMetadata + ForEach + CopyActivity chain
+        activities = self.build_foreach_copy_all_tables(
+            source_workspace_id=source_ws_id,
+            source_lakehouse_id=source_lakehouse_id,
+            sink_workspace_id=sink_ws_id,
+            sink_lakehouse_id=sink_lakehouse_id,
+            table_action=table_action,
+        )
+
+        definition = self.build_pipeline_definition(activities)
+
+        result = self.rest_client.update_item_definition(
+            workspace_id, pipeline_id, definition, self.ITEM_TYPE
+        )
+
+        if result.success:
+            return self._make_result(
+                OperationType.CREATE, True,
+                f"ForEach + Copy Activity configured: all tables {source_item_name} → {sink_item_name}",
+                data={
+                    "pipeline_id": pipeline_id,
+                    "activities": ["GetTableList", "ForEach_Table → CopyActivity"],
+                    "source": {"name": source_item_name, "id": source_lakehouse_id, "workspace_id": source_ws_id},
+                    "sink": {"name": sink_item_name, "id": sink_lakehouse_id, "workspace_id": sink_ws_id},
+                    "table_action": table_action,
                 },
             )
         else:

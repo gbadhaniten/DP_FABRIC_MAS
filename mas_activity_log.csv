@@ -2,3 +2,4 @@ timestamp,job_id,job_name,agent,operation,cli_command,start_ms,duration_ms,token
 2026-03-31T08:49:58.384752+00:00,smoketest02,dashboard_smoke_test,orchestrator,job_start,,0,0,0,running,Job started: dashboard_smoke_test,local-workspace,,,,,
 2026-03-31T08:49:58.587558+00:00,smoketest02,dashboard_smoke_test,mon,analyze,REST /api/smoke,2,201,42,ok,Synthetic monitoring smoke-test event,local-workspace,SMOKE_ITEM,Monitoring,,,
 2026-03-31T08:49:58.790657+00:00,smoketest02,dashboard_smoke_test,orchestrator,job_end,,0,406,42,done,Smoke test completed,,,,,,
+2026-03-31T09:02:02.855463+00:00,aac8f36e,pipeline_orchestration,orchestrator,job_start,,0,0,0,running,Job started: pipeline_orchestration,DIG_FAB_MULTIAGENT,,,,,
