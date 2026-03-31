@@ -13,6 +13,7 @@ USAGE IN orchestrator.py — add at top:
     from fabric_mas.tools.telemetry_emitter import emit_event, emit_job_start, emit_job_end
 """
 
+import atexit
 import json
 import time
 import threading
@@ -25,16 +26,43 @@ ENABLED = True  # set to False to disable without removing imports
 
 _job_start_times: dict = {}
 _step_start_times: dict = {}
+_pending_posts: set[threading.Thread] = set()
+_pending_lock = threading.Lock()
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _track_thread(thread: threading.Thread) -> None:
+    with _pending_lock:
+        _pending_posts.add(thread)
+
+
+def _untrack_thread(thread: threading.Thread) -> None:
+    with _pending_lock:
+        _pending_posts.discard(thread)
+
+
+def _flush_pending_posts(timeout: float = 2.5) -> None:
+    deadline = time.time() + timeout
+    while True:
+        with _pending_lock:
+            threads = [thread for thread in _pending_posts if thread.is_alive()]
+        if not threads:
+            return
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return
+        for thread in threads:
+            thread.join(timeout=min(0.1, remaining))
+
+
 def _post(payload: dict) -> None:
     """Fire-and-forget POST — never blocks, never raises."""
     if not ENABLED:
         return
+
     def _send():
         try:
             data = json.dumps(payload, default=str).encode()
@@ -48,7 +76,19 @@ def _post(payload: dict) -> None:
                 pass
         except Exception:
             pass  # server not running — silently skip
-    threading.Thread(target=_send, daemon=True).start()
+
+    def _wrapped_send() -> None:
+        try:
+            _send()
+        finally:
+            _untrack_thread(thread)
+
+    thread = threading.Thread(target=_wrapped_send, daemon=True, name="fabric-mas-telemetry")
+    _track_thread(thread)
+    thread.start()
+
+
+atexit.register(_flush_pending_posts)
 
 
 def emit_job_start(
