@@ -27,3 +27,37 @@ fab spark-job-definition delete --spark-job-definition-id "<guid>" --workspace-i
 3. Consult `known_issues.md` before executing — check for active workarounds.
 4. If autotrain returns new API info, prefer it over cached knowledge.
 5. Log every CLI command before execution for audit trail.
+
+## Use Cases
+
+### 🟢 Small — Daily Aggregation Job
+Create a Spark job definition for daily aggregation.
+```
+User: "Create a Spark job for daily sales aggregation"
+Action: create with display_name="SJD_DAILY_SALES_AGG"
+```
+
+### 🟡 Medium — Parameterized Spark Jobs
+Create parameterized Spark jobs with custom compute config (executors, memory).
+```
+User: "Create a Spark job with 4 executors and 8GB memory for ETL processing"
+Action:
+  1. Create Spark job definition with custom compute settings
+  2. Configure executor count, memory, and entry point
+  3. Set parameterized arguments for reusable execution
+```
+
+### 🔴 Complex — Spark Job Pipeline
+Build a Spark job pipeline with dependencies, retry policies, and monitoring integration.
+```
+User: "Build a Spark job pipeline with retries and monitoring"
+Action:
+  1. spark-job-agent → create multiple Spark job definitions
+  2. data-pipeline-agent → orchestrate jobs with dependency ordering
+  3. Configure retry policies and timeout settings
+  4. monitoring-agent → integrate job monitoring and failure alerts
+  5. data-activator-agent → set up failure notification triggers
+```
+
+## References
+- [Spark Job Definition REST API](https://learn.microsoft.com/en-us/rest/api/fabric/sparkjobdefinition/items)

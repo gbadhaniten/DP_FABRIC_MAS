@@ -70,3 +70,49 @@ REST: POST /workspaces/{wsId}/items/{itemId}/jobs/instances/{instanceId}/cancel
 - "Show capacity info for my workspace"
 - "Trigger a refresh of semantic model SM_SALES"
 - "Cancel running job instance abc-123"
+
+## Use Cases
+
+### 🟢 Small — Check Platform Health Status
+**Scenario:** User wants a quick health check of a workspace.
+**Steps:**
+1. Validate `workspace_id`.
+2. Call `analyze` with `mode="workspace_health"`.
+3. Return item counts by type, workspace name, and overall status.
+
+**Example prompt:** *"Is workspace DIG_FAB_MULTIAGENT healthy?"*
+
+### 🟡 Medium — Get Failed Jobs from Last 24 Hours with Details
+**Scenario:** User needs to investigate recent failures across all items in a workspace.
+**Steps:**
+1. Validate `workspace_id`.
+2. Call `analyze` with `mode="failed_jobs"`.
+3. Scan all schedulable item types: DataPipeline, Notebook, SemanticModel, DataflowGen2, SparkJobDefinition, Lakehouse, Warehouse.
+4. For each item with failures, return:
+   - Item name and type
+   - Failure count in last 24 hours
+   - Last failure timestamp and error message
+   - Job instance ID for further investigation
+5. Sort by failure count (most failures first).
+
+**Example prompt:** *"Show me all failed jobs in DIG_FAB_MULTIAGENT from the last 24 hours"*
+
+### 🔴 Complex — Full Observability Dashboard
+**Scenario:** User needs a comprehensive monitoring view: capacity metrics, job history, refresh failures, and alerting.
+**Steps:**
+1. **Capacity check** — `mode="capacity"`: Get SKU, region, state, utilization.
+2. **Workspace health** — `mode="workspace_health"`: Item counts and status.
+3. **Failed jobs scan** — `mode="failed_jobs"`: All failures across all item types.
+4. **Job history** — `mode="job_history"` for critical items: Top pipelines and notebooks by run frequency.
+5. **Refresh history** — `mode="refresh_history"` for semantic models and dataflows.
+6. Compile consolidated report:
+   - Capacity utilization and headroom
+   - Success/failure rates by item type
+   - Top 5 most-failing items
+   - Items with no recent runs (potentially stale)
+   - Recommendations for alerting thresholds
+
+**Example prompt:** *"Give me a full observability report for workspace DIG_FAB_MULTIAGENT: capacity, failures, job history, and recommendations"*
+
+## References
+- [Job Scheduler REST API](https://learn.microsoft.com/en-us/rest/api/fabric/core/job-scheduler)

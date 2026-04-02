@@ -38,8 +38,9 @@ mcp = FastMCP(
     "Fabric-MAS",
     instructions=(
         "Multi-Agent System for managing Microsoft Fabric resources via natural language. "
-        "31 dedicated agents — one per Fabric item type + monitoring + data modeling — orchestrated "
-        "by a Master Brain. Powered by GitHub Copilot (no OpenAI API key needed). "
+        "29 dedicated agents — covering data engineering, integration, warehousing, governance, "
+        "AI, and data modeling — orchestrated by a Master Brain with parallel execution support. "
+        "Powered by GitHub Copilot (no OpenAI API key needed). "
         "Use these tools to create, update, delete, analyze, and deploy any Fabric resource."
     ),
 )
@@ -79,7 +80,8 @@ def _get_orchestrator():
     orch.auto_register()
     _orchestrator = orch
     logger.info(
-        "Orchestrator ready — 31 agents registered (Copilot-native, no API key needed)",
+        "Orchestrator ready — %d agents registered (Copilot-native, no API key needed)",
+        len(orch.registry.list_agents()),
     )
     return orch
 
@@ -130,7 +132,8 @@ def run_fabric_agent(
 
     Args:
         agent_key: The agent to invoke (e.g. "lakehouse", "notebook", "workspace",
-                   "data_pipeline", "semantic_model", "security", "data_modeling").
+                   "data_pipeline", "warehouse", "security", "data_modeling",
+                   "copy_job", "shortcut", "monitoring", "git_integration").
         operation: One of: "create", "update", "delete", "analyze", "deploy".
         params:    JSON string of parameters. Common params:
                    - display_name: Name of the item to create/update
@@ -159,11 +162,11 @@ def run_fabric_agent(
 @mcp.tool()
 def list_available_agents() -> str:
     """
-    List the current 31-agent Fabric roster and their capabilities.
+    List the current Fabric agent roster and their capabilities.
     Use this to discover which agents are available for executing tasks.
 
     Returns:
-        JSON with the current 31-agent roster, including agent names, item codes,
+        JSON with the agent roster, including agent names, item codes,
         categories, and supported operations.
     """
     orch = _get_orchestrator()

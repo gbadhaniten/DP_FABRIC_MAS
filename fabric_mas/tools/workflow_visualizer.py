@@ -49,7 +49,6 @@ CATEGORY_COLORS = {
     "data_integration":   "#2ecc71",
     "analytics":          "#3498db",
     "realtime":           "#9b59b6",
-    "reporting":          "#e67e22",
     "governance":         "#e74c3c",
     "ai_advanced":        "#f1c40f",
     "orchestrator":       "#ecf0f1",
@@ -59,19 +58,18 @@ CATEGORY_COLORS = {
 def _agent_category(agent_key: str) -> str:
     """Guess the category from the agent key for colour coding."""
     de = {"onelake", "lakehouse", "shortcut", "notebook", "spark_job"}
-    di = {"data_pipeline", "dataflow", "copy_job", "adf"}
+    di = {"data_pipeline", "copy_job", "adf", "data_wrangler"}
     an = {"warehouse", "sql_endpoint", "sql_database", "mirrored_db"}
-    rt = {"kql_queryset",
-          "data_activator", "reflex"}
-    rp = {"semantic_model", "report", "dashboard", "powerbi_app", "map_visual"}
-    go = {"workspace", "capacity", "domain", "deployment_pipeline", "git_integration",
-          "lineage", "monitoring", "variable_library", "task_flow", "security"}
+    rt = {"kql_queryset", "data_activator"}
+    ai = {"data_modeling", "data_agent", "copilot", "graphql_api", "udf"}
+    go = {"workspace", "capacity", "deployment_pipeline", "git_integration",
+          "lineage", "monitoring", "variable_library", "security"}
     k = agent_key.lower().replace("-", "_")
     if k in de: return "data_engineering"
     if k in di: return "data_integration"
     if k in an: return "analytics"
     if k in rt: return "realtime"
-    if k in rp: return "reporting"
+    if k in ai: return "ai_advanced"
     if k in go: return "governance"
     if k == "orchestrator": return "orchestrator"
     return "ai_advanced"
@@ -397,7 +395,6 @@ class WorkflowVisualizer:
   .badge.di  {{ background: #2ecc7133; color: #2ecc71; }}
   .badge.an  {{ background: #3498db33; color: #3498db; }}
   .badge.rt  {{ background: #9b59b633; color: #9b59b6; }}
-  .badge.rp  {{ background: #e67e2233; color: #e67e22; }}
   .badge.go  {{ background: #e74c3c33; color: #e74c3c; }}
   .badge.ai  {{ background: #f1c40f33; color: #f1c40f; }}
   .summary {{
@@ -497,7 +494,7 @@ class WorkflowVisualizer:
             cat = _agent_category(step.agent_key)
             cat_badge_class = {
                 "data_engineering": "de", "data_integration": "di",
-                "analytics": "an", "realtime": "rt", "reporting": "rp",
+                "analytics": "an", "realtime": "rt",
                 "governance": "go", "ai_advanced": "ai", "orchestrator": "ai",
             }.get(cat, "ai")
             cat_label = cat.replace("_", " ").title()

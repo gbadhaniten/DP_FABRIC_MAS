@@ -35,7 +35,9 @@ If `confidence < 0.70` → output `{ "clarification_needed": true, "question": "
 3. `execute_fabric_task(prompt)` — last resort for ambiguous requests only.
 
 ### RULE 3 — Dependency-ordered execution
-Execute in this order: **Workspaces → Lakehouses → Notebooks/Pipelines → Semantic Models → Reports → Git sync**
+Execute in this order: **Workspaces → Lakehouses → Notebooks/Pipelines → Warehouses → Git sync**
+
+Independent steps within the same tier execute in **parallel** (ThreadPoolExecutor, max 8 workers).
 
 If step N fails → stop, log, ask: *"Step N failed. Roll back completed steps? [y/n]"*
 
@@ -80,8 +82,6 @@ Call `check_naming_convention` before every create. Convention: `PREFIX_UPPER_SN
 | Warehouse | `WH_` |
 | Pipeline | `PL_` |
 | Notebook | `NB_` |
-| Semantic Model | `SM_` |
-| Report | `RPT_` |
 | Workspace | `WS_` (internal reference only) |
 
 If invalid → `"Name '<n>' is invalid. Suggested: '<corrected>'. Proceed? [y/n]"`
@@ -134,7 +134,7 @@ If the log server is not running, skip silently — never block execution.
 
 ---
 
-## SECTION 2 — AGENT ROUTING TABLE (31 agents)
+## SECTION 2 — AGENT ROUTING TABLE (29 agents)
 
 | User says | Agent key | Operation |
 |-----------|-----------|-----------|
@@ -143,9 +143,6 @@ If the log server is not running, skip silently — never block execution.
 | create/run pipeline | `data_pipeline` | create / run / deploy / list |
 | copy data between workspaces | `data_pipeline` | create (copy activity) |
 | create warehouse | `warehouse` | create / analyze |
-| create semantic model / dataset | `semantic_model` | create / refresh / analyze |
-| refresh semantic model | `semantic_model` | refresh |
-| create Power BI report | `report` | create / update |
 | create/manage workspace | `workspace` | create / list / delete / analyze |
 | list items in workspace | `workspace` | analyze (list_items=true) |
 | who has access to workspace | `workspace` | analyze (role_assignments=true) |
@@ -157,18 +154,22 @@ If the log server is not running, skip silently — never block execution.
 | check job history / failures | `monitoring` | get_failed_jobs / get_job_history |
 | copy job / data copy | `copy_job` | create / delete / list |
 | shortcut to ADLS/S3/GCS | `shortcut` | create / list / delete |
+| spark job / batch processing | `spark_job_definition` | create / run / list |
 | mirror database | `mirrored_database` | create / list / refresh |
-| create data agent (AI Q&A) | `data_agent` | create / add_datasource / publish |
-| variable library / env config | `variable_library` | create / set_variable / clone |
-| real-time dashboard | `realtime_dashboard` | create / update |
+| kql query / kusto | `kql_queryset` | create / analyze |
 | data activator / alert | `data_activator` | create / set_trigger / activate |
+| graphql api | `graphql_api` | create / analyze |
+| create data agent (AI Q&A) | `data_agent` | create / add_datasource / publish |
+| udf / custom function | `user_data_functions` | create / analyze |
+| data wrangler / prep | `data_wrangler` | create / analyze |
+| adf / data factory | `azure_data_factory` | create / analyze |
+| lineage / impact analysis | `lineage` | analyze |
+| variable library / env config | `variable_library` | create / set_variable / clone |
 | SQL database in Fabric | `sql_database` | create / query |
-| Power BI org app | `org_app` | create / publish / update |
-| ML experiment / model registry | `ml_experiment` | create / log / register |
-| dataflow / transform | `dataflow` | create / run / update |
-| medallion architecture | `lakehouse`×3 + `notebook` + `data_pipeline` | create (in order) |
-| run fabric job | `job_runner` | run / wait / get_status |
-| manage permissions (RBAC) | `permissions` | add / remove / list |
+| sql endpoint | `sql_endpoint` | create / analyze |
+| onelake / storage | `onelake` | analyze |
+| copilot / AI assistant | `copilot` | create / analyze |
+| medallion architecture | `lakehouse`×3 + `notebook` + `data_pipeline` | create (parallel) |
 
 ---
 

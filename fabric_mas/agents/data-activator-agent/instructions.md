@@ -27,3 +27,38 @@ fab data-activator delete --data-activator-id "<guid>" --workspace-id "<guid>"
 3. Consult `known_issues.md` before executing — check for active workarounds.
 4. If autotrain returns new API info, prefer it over cached knowledge.
 5. Log every CLI command before execution for audit trail.
+
+## Use Cases
+
+### 🟢 Small — Simple Threshold Alert
+Create a simple threshold alert.
+```
+User: "Create an alert when sales drop below 1000"
+Action: create with threshold condition on sales metric
+```
+
+### 🟡 Medium — Data-Driven Triggers with Notifications
+Create data-driven triggers with Teams/email notifications.
+```
+User: "Alert the team via Teams when inventory falls below safety stock"
+Action:
+  1. Create data activator trigger on inventory table
+  2. Configure threshold condition (inventory < safety_stock)
+  3. Set up Teams and email notification channels
+  4. Define alert frequency and suppression rules
+```
+
+### 🔴 Complex — Real-Time Monitoring Pipeline
+Build a real-time monitoring pipeline with streaming data activators and escalation rules.
+```
+User: "Build a real-time monitoring system with escalation for critical KPIs"
+Action:
+  1. data-activator-agent → create triggers for each KPI threshold
+  2. Configure escalation tiers (warning → critical → emergency)
+  3. kql-queryset-agent → set up streaming queries for real-time detection
+  4. Set up multi-channel notifications (Teams, email, webhook)
+  5. monitoring-agent → integrate with job monitoring for end-to-end visibility
+```
+
+## References
+- [Data Activator Introduction](https://learn.microsoft.com/en-us/fabric/data-activator/data-activator-introduction)

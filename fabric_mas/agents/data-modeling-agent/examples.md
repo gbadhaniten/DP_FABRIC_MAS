@@ -25,7 +25,7 @@ Steps:
   2. lakehouse-agent → create Silver lakehouse
   3. lakehouse-agent → create Gold lakehouse
   4. data-modeling-agent → create Sales star schema (targeting Gold)
-  5. semantic-model-agent → create Sales semantic model
+  5. warehouse-agent → create Sales warehouse from Gold lakehouse
 ```
 
 ### Custom Guidelines + Model Generation

@@ -72,3 +72,49 @@ fab data-pipeline delete --data-pipeline-id "<guid>" --workspace-id "<guid>"
 5. Follow naming convention (PL_ prefix, UPPER_SNAKE_CASE).
 6. Consult `known_issues.md` before executing — check for active workarounds.
 7. Log every operation for audit trail.
+
+## Use Cases
+
+### 🟢 Small — Create a Simple Pipeline with One Notebook Activity
+**Scenario:** User needs a basic pipeline that runs a single notebook.
+**Steps:**
+1. Validate `workspace_id`.
+2. Create pipeline via `POST /workspaces/{wsId}/items` with type `DataPipeline`.
+3. Build pipeline definition with a single Notebook activity referencing the target notebook ID.
+4. Call `updateDefinition` API to inject the activity.
+
+**Example prompt:** *"Create a pipeline PL_RUN_ETL that runs notebook NB_ETL_CUSTOMERS"*
+
+### 🟡 Medium — Pipeline with Copy Activity + Notebook Activity Chain (Cross-Workspace)
+**Scenario:** User needs a pipeline that copies data from one workspace to another, then runs a transformation notebook.
+**Steps:**
+1. Resolve source workspace name → ID and source item name → ID.
+2. Resolve sink workspace name → ID and sink item name → ID.
+3. Create pipeline in the target workspace.
+4. Build definition with two chained activities:
+   - **Copy Activity** — copies data from source lakehouse to sink lakehouse
+   - **Notebook Activity** — runs transformation notebook on success of copy
+5. Configure dependency: Notebook activity depends on Copy Activity `Succeeded` condition.
+6. Call `updateDefinition` API.
+
+**Example prompt:** *"Create a pipeline that copies LH_RAW from DIG_CORE_DATA_DEV to LH_BRONZE in DIG_FAB_MULTIAGENT, then runs NB_TRANSFORM"*
+
+### 🔴 Complex — Orchestration Pipeline with ForEach, Parameterized Notebooks, Failure Notifications, and Scheduled Triggers
+**Scenario:** User needs a full orchestration pipeline that iterates over tables, runs parameterized notebooks, handles failures, and runs on a schedule.
+**Steps:**
+1. Validate workspace and all referenced items.
+2. Create the master orchestration pipeline `PL_ORCHESTRATE_DAILY_ETL`.
+3. Build definition with:
+   - **Lookup Activity** — retrieves list of tables to process
+   - **ForEach Activity** — iterates over each table:
+     - **Copy Activity** — copies source table to Bronze lakehouse
+     - **Notebook Activity** — runs parameterized notebook with `table_name` parameter
+   - **On Failure path** — Web Activity to send failure notification (Teams/email webhook)
+4. Configure scheduled trigger (e.g., daily at 06:00 UTC).
+5. Call `updateDefinition` API with the full pipeline JSON.
+
+**Example prompt:** *"Create an orchestration pipeline that copies all tables from SQL Server to Bronze, transforms each with a parameterized notebook, and sends a Teams notification on failure"*
+
+## References
+- [DataPipeline REST API](https://learn.microsoft.com/en-us/rest/api/fabric/datapipeline/items)
+- [Pipeline REST API Guide](https://learn.microsoft.com/en-us/fabric/data-factory/pipeline-rest-api)

@@ -41,28 +41,19 @@ Every Fabric item name **MUST** start with a prefix that identifies its type.
 | **Warehouse** | `WH_` | `WH_<DOMAIN>_<LAYER>[_ENV]` | `WH_FINANCE_GOLD` |
 | **Notebook** | `NB_` | `NB_<PURPOSE>_<DETAIL>` | `NB_ETL_SALES_LOAD` |
 | **Data Pipeline** | `PL_` | `PL_<PURPOSE>_<DETAIL>` | `PL_DAILY_SALES_INGESTION` |
-| **Dataflow Gen2** | `DF_` | `DF_<PURPOSE>_<DETAIL>` | `DF_TRANSFORM_CUSTOMER` |
 | **Copy Job** | `CJ_` | `CJ_<SOURCE>_TO_<TARGET>` | `CJ_SAP_TO_BRONZE` |
 | **Spark Job Definition** | `SJ_` | `SJ_<PURPOSE>_<DETAIL>` | `SJ_AGGREGATE_MONTHLY` |
-| **Semantic Model** | `SM_` | `SM_<DOMAIN>_<PURPOSE>` | `SM_SALES_REPORTING` |
-| **Report** | `RPT_` | `RPT_<DOMAIN>_<PURPOSE>` | `RPT_FINANCE_MONTHLY` |
-| **Dashboard** | `DSH_` | `DSH_<DOMAIN>_<PURPOSE>` | `DSH_EXECUTIVE_KPI` |
-| **Power BI App** | `APP_` | `APP_<DOMAIN>_<PURPOSE>` | `APP_HR_ANALYTICS` |
 | **SQL Database** | `SQLDB_` | `SQLDB_<DOMAIN>_<PURPOSE>` | `SQLDB_MDM_MASTER` |
 | **SQL Analytics Endpoint** | `SQLE_` | `SQLE_<DOMAIN>_<PURPOSE>` | `SQLE_SALES_ANALYTICS` |
 | **Mirrored Database** | `MDB_` | `MDB_<SOURCE>_<PURPOSE>` | `MDB_ORACLE_FINANCE` |
 | **KQL Queryset** | `KQLQS_` | `KQLQS_<DOMAIN>_<PURPOSE>` | `KQLQS_IOT_ALERTS` |
-| **Data Activator / Reflex** | `RFX_` | `RFX_<DOMAIN>_<PURPOSE>` | `RFX_ALERT_THRESHOLD` |
+| **Data Activator** | `RFX_` | `RFX_<DOMAIN>_<PURPOSE>` | `RFX_ALERT_THRESHOLD` |
 | **Deployment Pipeline** | `DPL_` | `DPL_<PURPOSE>` | `DPL_CICD_SALES` |
-| **Domain** | `DOM_` | `DOM_<NAME>` | `DOM_FINANCE` |
 | **Shortcut** | `SC_` | `SC_<SOURCE>_<TARGET>` | `SC_ADLS_RAW_SALES` |
 | **GraphQL API** | `GQL_` | `GQL_<DOMAIN>_<PURPOSE>` | `GQL_CUSTOMER_API` |
 | **Monitoring** | `MON_` | `MON_<PURPOSE>_<DETAIL>` | `MON_PLATFORM_HEALTH` |
 | **Variable Library** | `VL_` | `VL_<PURPOSE>` | `VL_CONFIG_PARAMS` |
-| **Task Flow** | `TF_` | `TF_<PURPOSE>` | `TF_DAILY_ORCHESTRATION` |
-| **Map Visual** | `MAP_` | `MAP_<DOMAIN>_<PURPOSE>` | `MAP_GEO_SALES` |
 | **Data Agent** | `DA_` | `DA_<DOMAIN>_<PURPOSE>` | `DA_SALES_COPILOT` |
-| **AI Functions** | `AIF_` | `AIF_<PURPOSE>` | `AIF_SENTIMENT_ANALYSIS` |
 | **User Data Functions** | `UDF_` | `UDF_<PURPOSE>` | `UDF_PARSE_ADDRESS` |
 | **OneLake** | `OL_` | `OL_<PURPOSE>` | `OL_CENTRAL_STORE` |
 | **Git Integration** | `GIT_` | `GIT_<REPO>_<BRANCH>` | `GIT_FABRIC_MAS_MAIN` |
@@ -127,10 +118,8 @@ Lakehouse:      LH_MDM_EBX_GOLD_PRD
 Warehouse:      WH_FIN_GOLD
 Notebook:       NB_ETL_SALES_DAILY_LOAD
 Pipeline:       PL_INGESTION_SAP_SALES
-Dataflow:       DF_TRANSFORM_CUSTOMER_DIM
-Semantic Model: SM_SALES_MONTHLY_REPORTING
-Report:         RPT_FIN_PNL_MONTHLY
-Dashboard:      DSH_EXEC_KPI_OVERVIEW
+Copy Job:       CJ_SAP_TO_BRONZE
+SQL Database:   SQLDB_MDM_MASTER
 ```
 
 ---
@@ -145,29 +134,19 @@ validation:
   Warehouse: "WH_"
   Notebook: "NB_"
   DataPipeline: "PL_"
-  DataflowGen2: "DF_"
   CopyJob: "CJ_"
   SparkJobDefinition: "SJ_"
-  SemanticModel: "SM_"
-  Report: "RPT_"
-  Dashboard: "DSH_"
-  PowerBIApp: "APP_"
   SQLDatabase: "SQLDB_"
   SQLAnalyticsEndpoint: "SQLE_"
   MirroredDatabase: "MDB_"
   KQLQueryset: "KQLQS_"
-  Reflex: "RFX_"
   DataActivator: "RFX_"
   DeploymentPipeline: "DPL_"
-  Domain: "DOM_"
   Shortcut: "SC_"
   GraphQLApi: "GQL_"
   Monitoring: "MON_"
   VariableLibrary: "VL_"
-  TaskFlow: "TF_"
-  MapVisual: "MAP_"
   DataAgent: "DA_"
-  AIFunctions: "AIF_"
   UserDataFunctions: "UDF_"
   OneLake: "OL_"
   GitIntegration: "GIT_"

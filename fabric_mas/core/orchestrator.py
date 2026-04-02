@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
@@ -212,7 +213,6 @@ AGENT_KEYWORDS: Dict[str, List[str]] = {
     "data_pipeline": [
         "pipeline", "data pipeline", "etl pipeline", "orchestration pipeline",
     ],
-    "dataflow_gen2": ["dataflow", "data flow", "dataflow gen2", "power query", "mashup"],
     "copy_job": ["copy job", "copy activity", "data copy", "copy task"],
     "azure_data_factory": ["adf", "azure data factory", "data factory"],
     "warehouse": [
@@ -224,19 +224,8 @@ AGENT_KEYWORDS: Dict[str, List[str]] = {
 
     "kql_queryset": ["kql query", "kql queryset", "kusto query"],
 
-    "data_activator": ["data activator", "activator", "trigger", "alert"],
-    "reflex": ["reflex", "reactive", "reflex trigger"],
-    "semantic_model": [
-        "semantic model", "dataset", "tabular model", "power bi model",
-    ],
-    "report": ["report", "power bi report", "pbi report", "paginated report"],
-    "dashboard": ["dashboard", "power bi dashboard", "pbi dashboard"],
-    "power_bi_app": ["powerbi app", "power bi app", "pbi app"],
-
-    "map_visual": ["map visual", "arcgis", "geographic"],
     "workspace": ["workspace", "ws", "project space", "fabric workspace"],
     "capacity": ["capacity", "sku", "compute", "f64", "f32", "f16", "f2"],
-    "domain": ["domain", "data domain", "organizational domain"],
     "deployment_pipeline": [
         "deployment pipeline", "deploy pipeline", "ci/cd", "promotion",
     ],
@@ -248,7 +237,6 @@ AGENT_KEYWORDS: Dict[str, List[str]] = {
     ],
 
     "variable_library": ["variable", "variable library", "parameter", "config variable"],
-    "task_flow": ["task flow", "taskflow", "dag"],
     "security": [
         "security", "rls", "row level security", "ols", "role", "permission",
         "rbac", "access control",
@@ -258,8 +246,6 @@ AGENT_KEYWORDS: Dict[str, List[str]] = {
     "copilot": ["copilot settings", "copilot config"],
     "graphql_api": ["graphql", "api endpoint", "graphql api"],
     "user_data_functions": ["udf", "user defined function", "custom function", "user data function"],
-    "ai_functions": ["ai function", "ai functions", "ml function"],
-    "ontology": ["ontology", "knowledge graph", "semantic layer"],
     "data_wrangler": ["data wrangler", "wrangler", "data prep", "data preparation"],
 
     "data_modeling": [
@@ -734,39 +720,140 @@ class Orchestrator:
         self._agent_instances[key] = agent
         return agent
 
-    def execute_plan(self, plan: ExecutionPlan) -> List[AgentResult]:
-        results: List[AgentResult] = []
-        for step in plan.steps:
-            logger.info(
-                "▶ Step %d: %s.%s — %s",
-                step.step_number, step.agent_key, step.operation, step.description,
+    # ------------------------------------------------------------------
+    # Dependency graph for parallel execution
+    # ------------------------------------------------------------------
+    # Steps that share the same agent_key or have explicit ordering are
+    # sequential.  Independent agents (e.g. 3 lakehouses) run in parallel.
+    DEPENDENCY_ORDER = [
+        "workspace", "capacity", "lakehouse", "warehouse", "shortcut",
+        "notebook", "spark_job_definition", "data_pipeline", "copy_job",
+        "deployment_pipeline", "git_integration", "security", "monitoring",
+    ]
+
+    def _group_steps_for_parallel(
+        self, steps: List[TaskStep]
+    ) -> List[List[TaskStep]]:
+        """
+        Group plan steps into parallel batches based on dependencies.
+
+        Rules:
+        - Steps with different agent types at the same dependency tier
+          can run concurrently (e.g. 3 lakehouse creates).
+        - Steps that depend on a prior tier must wait (e.g. notebooks
+          wait for lakehouses).
+        - If all steps are the same agent, they run in parallel.
+        """
+        if len(steps) <= 1:
+            return [steps] if steps else []
+
+        # Assign a tier to each step based on DEPENDENCY_ORDER
+        tier_map: Dict[str, int] = {
+            k: i for i, k in enumerate(self.DEPENDENCY_ORDER)
+        }
+
+        # Group steps by tier
+        tiered: Dict[int, List[TaskStep]] = {}
+        for step in steps:
+            tier = tier_map.get(step.agent_key, 50)  # unknown agents at tier 50
+            tiered.setdefault(tier, []).append(step)
+
+        # Return groups sorted by tier — each group runs in parallel
+        batches = []
+        for tier_num in sorted(tiered.keys()):
+            batches.append(tiered[tier_num])
+        return batches
+
+    def _execute_step(self, step: TaskStep, prompt: str) -> AgentResult:
+        """Execute a single step — used by both serial and parallel paths."""
+        logger.info(
+            "▶ Step %d: %s.%s — %s",
+            step.step_number, step.agent_key, step.operation, step.description,
+        )
+        agent = self._get_agent_instance(step.agent_key)
+        if agent is None:
+            result = AgentResult(
+                success=False,
+                operation=step.operation,
+                agent_name="orchestrator",
+                item_type=step.agent_key,
+                message=f"No agent registered for '{step.agent_key}'",
             )
-            agent = self._get_agent_instance(step.agent_key)
-            if agent is None:
-                result = AgentResult(
-                    success=False,
+        else:
+            step.params["job_id"] = getattr(self, "_current_job_id", "unknown")
+            step.params["job_name"] = getattr(self, "_current_job_name", "")
+            result = agent.execute(step.operation, step.params)
+            try:
+                agent.knowledge.log_prompt(
+                    prompt=prompt,
                     operation=step.operation,
-                    agent_name="orchestrator",
-                    item_type=step.agent_key,
-                    message=f"No agent registered for '{step.agent_key}'",
+                    result_summary=result.message,
+                    success=result.success,
                 )
-            else:
-                step.params["job_id"] = getattr(self, "_current_job_id", "unknown")
-                step.params["job_name"] = getattr(self, "_current_job_name", "")
-                result = agent.execute(step.operation, step.params)
-                # ── Auto-learning: log prompt → agent's examples.md ──
-                try:
-                    agent.knowledge.log_prompt(
-                        prompt=plan.prompt,
-                        operation=step.operation,
-                        result_summary=result.message,
-                        success=result.success,
+            except Exception as exc:
+                logger.warning("Prompt logging failed for %s: %s", step.agent_key, exc)
+        step.result = result
+        logger.info("  %s", result)
+        return result
+
+    def execute_plan(self, plan: ExecutionPlan) -> List[AgentResult]:
+        """
+        Execute a plan with intelligent parallel dispatch.
+
+        Steps in the same dependency tier run concurrently via ThreadPool.
+        Steps in different tiers run sequentially (tier N completes before
+        tier N+1 starts). If any step in a tier fails, subsequent tiers
+        are skipped (fail-fast).
+        """
+        results: List[AgentResult] = []
+        batches = self._group_steps_for_parallel(plan.steps)
+
+        for batch in batches:
+            if len(batch) == 1:
+                # Single step — run directly (no thread overhead)
+                result = self._execute_step(batch[0], plan.prompt)
+                results.append(result)
+                if not result.success:
+                    logger.warning(
+                        "⚠️ Step %d failed — halting subsequent tiers",
+                        batch[0].step_number,
                     )
-                except Exception as exc:
-                    logger.warning("Prompt logging failed for %s: %s", step.agent_key, exc)
-            step.result = result
-            results.append(result)
-            logger.info("  %s", result)
+                    break
+            else:
+                # Multiple independent steps — run in parallel
+                logger.info(
+                    "⚡ Parallel batch: %d steps [%s]",
+                    len(batch),
+                    ", ".join(s.agent_key for s in batch),
+                )
+                batch_results: List[AgentResult] = []
+                with ThreadPoolExecutor(max_workers=min(len(batch), 8)) as pool:
+                    futures = {
+                        pool.submit(self._execute_step, step, plan.prompt): step
+                        for step in batch
+                    }
+                    for future in as_completed(futures):
+                        try:
+                            result = future.result()
+                        except Exception as exc:
+                            step = futures[future]
+                            result = AgentResult(
+                                success=False,
+                                operation=step.operation,
+                                agent_name="orchestrator",
+                                item_type=step.agent_key,
+                                message=f"Parallel execution error: {exc}",
+                                errors=[str(exc)],
+                            )
+                            step.result = result
+                        batch_results.append(result)
+                results.extend(batch_results)
+
+                # If any step in the batch failed, halt
+                if not all(r.success for r in batch_results):
+                    logger.warning("⚠️ Parallel batch had failures — halting subsequent tiers")
+                    break
+
         return results
 
     # ------------------------------------------------------------------

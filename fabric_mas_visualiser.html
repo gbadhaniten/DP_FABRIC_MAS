@@ -193,7 +193,7 @@ header{background:var(--navy);color:#fff;height:50px;display:flex;align-items:ce
 
 <script>
 const SRV='http://localhost:7842',POLL=5000;
-const AC={orchestrator:'#0F2D5E',lakehouse:'#006B8F',notebook:'#00695C',data_pipeline:'#B07D1E',warehouse:'#534AB7',semantic_model:'#993C1D','data-modeling':'#185FA5',workspace:'#5F5E5A',security:'#A32D2D',deployment_pipeline:'#0F6E56',monitoring:'#633806',copy_job:'#1D3557',shortcut:'#4A0E8F',mirrored_database:'#2C6E49',data_agent:'#184E77',variable_library:'#6B3FA0',realtime_dashboard:'#72243E',data_activator:'#854F0B',sql_database:'#0C3547',org_app:'#2D6A4F',ml_experiment:'#403D39',dataflow:'#1B4332',job_runner:'#264653',permissions:'#6D2E46',report:'#1E3A5F',capacity:'#3D405B',git_integration:'#1D3557',default:'#64748B'};
+const AC={orchestrator:'#0F2D5E',lakehouse:'#006B8F',notebook:'#00695C',data_pipeline:'#B07D1E',warehouse:'#534AB7','data-modeling':'#185FA5',workspace:'#5F5E5A',security:'#A32D2D',deployment_pipeline:'#0F6E56',monitoring:'#633806',copy_job:'#1D3557',shortcut:'#4A0E8F',mirrored_database:'#2C6E49',data_agent:'#184E77',variable_library:'#6B3FA0',data_activator:'#854F0B',sql_database:'#0C3547',sql_endpoint:'#0C5547',capacity:'#3D405B',git_integration:'#1D3557',kql_queryset:'#72243E',graphql_api:'#2D6A4F',spark_job_definition:'#403D39',onelake:'#1B4332',copilot:'#264653',udf:'#6D2E46',data_wrangler:'#1E3A5F',azure_data_factory:'#993C1D',lineage:'#184E77',default:'#64748B'};
 const ac=k=>AC[k]||AC[(k||'').replace(/-/g,'_')]||AC.default;
 let S={jobs:[],events:[],tot:0,cnt:0,ss:null},sel=null,cd=POLL/1000,pt,ct;
 

@@ -1,275 +1,175 @@
 # 💡 SAMPLE PROMPTS — Fabric Multi-Agent System (Fabric-MAS)
 
-> Master catalogue of sample prompts organised by use case.
-> Use these as starting points — the system handles natural language, so
-> feel free to rephrase in your own words.
-> **Copilot-Native** — Just type these in GitHub Copilot Chat. No API key needed.
+> This is the **single canonical prompt file** for Fabric-MAS.
+> It replaces `MASTER_PROMPT.md` and contains small, medium, and complex scenarios.
+> Use these directly in GitHub Copilot Chat (Agent mode).
 
 ---
 
 ## 📂 Table of Contents
-1. [Data Engineering](#-data-engineering)
-2. [Data Integration & ETL](#-data-integration--etl)
-3. [Analytics & Warehousing](#-analytics--warehousing)
-4. [Data Modeling (NEW)](#-data-modeling)
-5. [Real-Time Intelligence](#-real-time-intelligence)
-6. [Reporting & Power BI](#-reporting--power-bi)
-7. [Governance & Administration](#-governance--administration)
-8. [AI & Advanced Features](#-ai--advanced-features)
-9. [Multi-Step Workflows](#-multi-step-workflows)
-10. [Analysis & Audit](#-analysis--audit)
-11. [Cleanup & Deletion](#-cleanup--deletion)
+1. [Small Scenarios (Single Agent)](#-small-scenarios-single-agent)
+2. [Medium Scenarios (2–4 Agents)](#-medium-scenarios-24-agents)
+3. [Complex Scenarios (End-to-End)](#-complex-scenarios-end-to-end)
+4. [Reusable Prompt Templates](#-reusable-prompt-templates)
+5. [Validation & Audit Prompts](#-validation--audit-prompts)
 
 ---
 
-## 🗄️ Data Engineering
+## 🟢 Small Scenarios (Single Agent)
 
 ### Lakehouse
-```
-Create a Bronze lakehouse for raw data ingestion in workspace ws-123
-Create Bronze, Silver, and Gold lakehouses for a medallion architecture
-Update the Gold lakehouse description to "Curated Analytics Layer"
-Delete the deprecated staging lakehouse in workspace ws-old
-Analyze tables and files in the Bronze lakehouse
+```text
+Create a lakehouse named LH_BRONZE_RAW in workspace DIG_CORE_DATA_DEV.
 ```
 
-### OneLake & Shortcuts
-```
-Create a OneLake shortcut to our ADLS Gen2 container at abfss://raw@storage.dfs.core.windows.net
-List all shortcuts in the Bronze lakehouse
-Delete the S3 shortcut that's no longer needed
-Analyze OneLake storage usage across all lakehouses in the workspace
+### Notebook
+```text
+Create a notebook named NB_SILVER_TRANSFORM in workspace DIG_CORE_DATA_DEV.
 ```
 
-### Notebooks
+### Data Pipeline
+```text
+Create a pipeline named PL_DAILY_INGEST in workspace DIG_CORE_DATA_DEV.
 ```
-Create an ETL notebook called TransformSales for Bronze to Silver processing
-Create a PySpark notebook for data quality checks
-Update the TransformSales notebook to use Spark 3.4 runtime
-Analyze notebook execution history — show me failures from the last week
-```
-
-### Environments
-```
-Create a Spark environment with pandas, numpy, and scikit-learn
-Update the ML environment to add tensorflow and pytorch
-Analyze environment compute configuration and library versions
-```
-
-### Spark Jobs
-```
-Create a Spark job definition for daily sales aggregation
-Update the Spark job to use 8 executors and 32GB memory
-Analyze Spark job execution performance over the last month
-```
-
----
-
-## 🔄 Data Integration & ETL
-
-### Data Pipelines
-```
-Create a pipeline called DailyETL with a notebook activity that runs TransformSales
-Create a pipeline with Copy activity from SQL Server to Lakehouse, then run a notebook
-Update the DailyETL pipeline to run every 6 hours instead of daily
-Analyze pipeline run history — show failures and average duration
-```
-
-### Dataflows
-```
-Create a Dataflow Gen2 for customer data cleansing and deduplication
-Update the CustomerDataflow to add a merge step with product dimension
-Analyze dataflow refresh history and performance
-```
-
-### Copy Jobs
-```
-Create a copy job from Azure SQL Database to the Bronze lakehouse
-Create a copy job from on-prem SQL Server to Fabric using gateway
-Update the copy job column mapping for new schema changes
-Analyze copy job throughput — how many rows per minute?
-```
-
----
-
-## 📊 Analytics & Warehousing
 
 ### Warehouse
-```
-Create a Synapse Warehouse called SalesWarehouse in workspace ws-analytics
-Create warehouse with stored procedures for the reporting layer
-Update warehouse with new views for the finance team
-Analyze warehouse query performance — find the slowest queries
+```text
+Create a warehouse named WH_GOLD_ANALYTICS in workspace DIG_CORE_DATA_DEV.
 ```
 
-### SQL Database
-```
-Create a SQL Database for operational reporting
-Update database schema with new customer dimension table
-Analyze SQL database size, growth rate, and index usage
+### Security Audit
+```text
+Analyze workspace access and list role assignments for DIG_CORE_DATA_DEV.
 ```
 
-### Mirrored Database
-```
-Create a mirrored database from our Azure SQL production server
-Create mirroring for Cosmos DB analytical store
-Update mirroring configuration to include new tables
-Analyze mirroring replication lag and sync status
-```
-
-### SQL Endpoints
-```
-Analyze SQL endpoint connection strings for all lakehouses
-List all SQL endpoints and their auto-generated views
-Check SQL endpoint availability and response times
+### Monitoring
+```text
+Show failed jobs for workspace DIG_CORE_DATA_DEV in the last 24 hours.
 ```
 
 ---
 
-## 🧩 Data Modeling
+## 🟡 Medium Scenarios (2–4 Agents)
 
-### Star Schema
-```
-Generate a star schema for sales analytics with Fact_Sales and dimensions for Date, Customer, Product, Store
-Create a star schema model for inventory management
-Build a dimensional model for HR analytics with employee and department dimensions
-```
-
-### Snowflake Schema
-```
-Generate a snowflake schema for e-commerce with normalized product hierarchy
-Create a snowflake model for the finance domain with account and cost center hierarchies
+### Medallion Foundation
+```text
+In workspace DIG_CORE_DATA_DEV, create LH_BRONZE_RAW, LH_SILVER_CURATED, and LH_GOLD_CONSUMPTION,
+then create notebook NB_BRONZE_TO_SILVER and pipeline PL_BRONZE_TO_SILVER to run it.
 ```
 
-### SCD (Slowly Changing Dimensions)
-```
-Create dimension tables with SCD Type 2 for customer address tracking
-Generate a model with SCD Type 1 for product category (overwrite, no history)
-Build Dim_Employee with SCD Type 2 tracking department changes
-```
-
-### Output Formats
-```
-Generate a sales star schema as SQL DDL for Fabric Warehouse
-Create a product analytics model and output as TMDL
-Generate a data model definition as JSON for review
+### Warehouse + Data Model
+```text
+Create WH_SALES_ANALYTICS in DIG_CORE_DATA_DEV, generate a star schema for sales,
+and provide SQL DDL to implement it in the warehouse.
 ```
 
-### Update Guidelines
-```
-Update data modeling guidelines: use 'f_' prefix for facts and 'd_' for dimensions
-Update the naming convention to use PascalCase for table names
-Add a guideline: all date dimensions must include fiscal year columns
-Show me the current data modeling guidelines
+### Copy + Transform
+```text
+Create a copy pipeline from DIGITEAM_FAB_SELFSERVICE_PUBLIC/LH_MDM to DIG_CORE_DATA_DEV/LH_BRONZE_RAW,
+then create a transformation notebook and pipeline schedule every 6 hours.
 ```
 
-### Combined Workflows
-```
-Create a Gold lakehouse, generate a star schema for sales, and create a semantic model on top
-Design a dimensional model for customer analytics, generate SQL, then create it in the warehouse
+### Governance Package
+```text
+For workspace DIG_CORE_DATA_DEV: assign capacity, audit current RBAC, connect Git integration,
+and return a summary of configuration drift risks.
 ```
 
 ---
 
-### KQL Queries
-```
-Create a KQL Queryset for anomaly detection on temperature readings
+## 🔴 Complex Scenarios (End-to-End)
+
+### End-to-End Data Engineering Platform
+```text
+Create an end-to-end solution in DIG_CORE_DATA_DEV:
+1) Create Bronze, Silver, Gold lakehouses.
+2) Create notebooks for Bronze→Silver and Silver→Gold transformations.
+3) Create orchestration pipelines with retries and failure notifications.
+4) Create WH_GOLD_ANALYTICS from Gold.
+5) Generate and apply a sales star schema.
+6) Configure RBAC for Data Engineers and Business Analysts.
+7) Connect workspace to Git and provide branch strategy.
+8) Run a final health audit and return risks + remediation actions.
 ```
 
-### Data Activator & Reflex
-```
-Create a Data Activator trigger when CPU exceeds 90%
-Create a Reflex that sends an email when sales drop below threshold
-Update Activator alert to include Teams notification
-Analyze alert history — how many triggers in the last 24 hours?
-```
-
----
-
-## 📈 Reporting & Power BI
-
-### Semantic Models
-```
-Create a semantic model from the Gold lakehouse tables
-Create a composite model combining warehouse and lakehouse sources
-Update semantic model with new DAX measures for YoY comparison
-Analyze semantic model refresh performance and size
+### Cross-Workspace Copy + Promotion
+```text
+Build cross-workspace movement from DIGITEAM_FAB_SELFSERVICE_PUBLIC/LH_MDM
+to DIG_CORE_DATA_DEV/LH_BRONZE_RAW using a copy pipeline.
+Then create downstream Silver/Gold processing, warehouse analytics, and
+deployment promotion plan Dev→Test→Prod with rollback guidance.
 ```
 
-### Reports
-```
-Create a Power BI report from the Sales semantic model
-Create a paginated report for monthly financial statements
-Update report theme to corporate branding guidelines
-Analyze report usage — who's viewing it and how often?
-```
-
-### Dashboards
-```
-Create a Power BI dashboard with pinned visuals from Sales report
-Update dashboard to add a new real-time tile
-Analyze dashboard data refresh schedule and staleness
-```
-
-### Apps
-```
-Create a Power BI app for the Finance team with curated content
-Update app audience to include the Marketing group
-Deploy the latest app update to all subscribers
-Analyze app adoption metrics — installs, active users, engagement
+### Reliability & Cost Optimization
+```text
+Audit all pipelines, spark jobs, and capacities in DIG_CORE_DATA_DEV.
+Identify top failures, bottlenecks, and cost hotspots.
+Implement recommended scheduling, retry, and capacity adjustments,
+then produce before/after operational KPIs.
 ```
 
 ---
 
-## 🔐 Governance & Administration
+## 🧱 Reusable Prompt Templates
 
-### Workspace Management
-```
-Create a new workspace called DataPlatform-Prod
-Create workspaces for Dev, Test, and Prod environments
-Update workspace to assign F64 capacity
-Analyze workspace item inventory — list everything with sizes
+### Template A — Single Item Create
+```text
+Create a <item_type> named <PREFIX_NAME> in workspace <WORKSPACE_NAME_OR_ID> with description "<DESC>".
 ```
 
-### Capacity
-```
-Assign F64 capacity to the production workspace
-Update capacity from F32 to F64 for peak month-end processing
-Analyze capacity utilization — are we being throttled?
-Scale down capacity to F16 for the weekend
-```
-
-### Security
-```
-Create workspace role assignments: Admins=IT Team, Viewers=Business Users
-Update security to add the DataEngineers group as Contributors
-Analyze who has access to what in the workspace
-Audit permissions for the sensitive Financial workspace
+### Template B — Multi-Step Build
+```text
+In workspace <WORKSPACE>, create <ITEM_1>, <ITEM_2>, and <ITEM_3>.
+Then configure dependencies so <ITEM_2> reads from <ITEM_1> and <ITEM_3> reads from <ITEM_2>.
+Return execution plan, results, and failed-step remediation if any.
 ```
 
-### Deployment Pipelines
-```
-Create a Dev → Test → Prod deployment pipeline
-Deploy all items from Test stage to Production
-Analyze deployment history — show rollbacks and failures
-Compare Dev and Prod stages for configuration drift
-```
-
-### Git Integration
-```
-Connect workspace to our Azure DevOps repository
-Sync workspace with the main branch
-Analyze git sync status — are there conflicts?
-Update git branch from feature/etl-update to main
+### Template C — Cross-Workspace Copy
+```text
+Create a copy pipeline from <SOURCE_WORKSPACE>/<SOURCE_ITEM>
+to <SINK_WORKSPACE>/<SINK_ITEM> with pipeline name PL_COPY_<SOURCE>_TO_<SINK>.
+Include schedule, retry policy, and monitoring hooks.
 ```
 
-### Domains
-```
-Create a domain called "Finance Analytics" and assign workspaces
-Update domain endorsement to "Promoted" for the Gold workspace
+### Template D — Audit
+```text
+Run a workspace audit for <WORKSPACE>:
+- inventory of items
+- RBAC summary
+- failed jobs in last <N> days
+- deployment risks
+- top 5 recommended fixes
 ```
 
-### Lineage
+---
+
+## ✅ Validation & Audit Prompts
+
+```text
+List all available agents and categorize them by capability.
+```
+
+```text
+Validate naming conventions for these items: LH_BRONZE_RAW, NB_ETL_SALES, PL_DAILY_LOAD.
+```
+
+```text
+Simulate this workflow without execution and show the visual plan:
+Create Bronze/Silver/Gold lakehouses, notebook transforms, and one orchestrator pipeline.
+```
+
+```text
+Run a system status check and show MCP server health, registered agents, and telemetry readiness.
+```
+
+---
+
+## Notes
+
+- Use uppercase prefixes where applicable: `LH_`, `NB_`, `PL_`, `WH_`.
+- Prefer precise workspace names/IDs in prompts.
+- For production-impacting operations (delete/deploy/remove permissions), confirm explicitly.
+- For large jobs, ask for a **plan + telemetry + flow output**.
 ```
 Trace end-to-end data lineage for the Revenue Dashboard
 Show me what's impacted if I change the Bronze lakehouse schema
@@ -301,10 +201,9 @@ Update Data Agent knowledge base with business glossary
 Analyze Data Agent query accuracy and user satisfaction
 ```
 
-### UDFs & AI Functions
+### UDFs
 ```
 Create a user-defined function for custom fiscal year calculation
-Create an AI function that calls Azure OpenAI for text classification
 Update UDF to handle null values gracefully
 Analyze UDF usage across all notebooks
 ```
@@ -316,8 +215,8 @@ Analyze UDF usage across all notebooks
 ### End-to-End Lakehouse Pipeline
 ```
 Build a complete data platform: create Bronze, Silver, Gold lakehouses,
-ETL notebooks for each layer, a daily pipeline, a semantic model,
-and a Power BI report — all in workspace ws-data-prod
+ETL notebooks for each layer, a daily pipeline, and configure
+security roles — all in workspace ws-data-prod
 ```
 
 ### Workspace Governance Setup
@@ -330,8 +229,8 @@ Dev-Test-Prod deployment pipeline
 ### Migration from Dev to Prod
 ```
 Deploy the latest changes from Development to Production: sync the
-git branch, run the deployment pipeline, verify the semantic model
-refresh, and check the report renders correctly
+git branch, run the deployment pipeline, and verify all items deployed
+correctly
 ```
 
 ---

@@ -1,281 +1,186 @@
 # 🏗️ ARCHITECTURE — Fabric Multi-Agent System (Fabric-MAS)
 
-> **Copilot-Native** — No OpenAI API key required. GitHub Copilot is the LLM.
+> **Copilot-Native**: GitHub Copilot is the LLM. No OpenAI API key required.
 
-## System Overview
+## 1) What this system is
 
-Fabric-MAS is a **Python-based multi-agent system** that manages Microsoft Fabric resources
-through natural language. It exposes a **Model Context Protocol (MCP)** server that VS Code
-GitHub Copilot invokes directly. A keyword-based orchestrator routes user prompts to
-**40 specialised agents** — one per Fabric item type + a monitoring agent + a data modeling agent.
+Fabric-MAS is a Python multi-agent orchestration layer for Microsoft Fabric operations.
+It exposes MCP tools that Copilot can call directly from VS Code and routes requests to
+specialized agents for data engineering, integration, analytics, governance, and AI workflows.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    GitHub Copilot (LLM)                         │
-│              Your Copilot licence — no API key needed            │
-│              Natural language understanding built-in             │
-└────────────────────────────┬────────────────────────────────────┘
-                             │  MCP Protocol (stdio)
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       mcp_server.py                             │
-│             FastMCP Server — 8 Exposed Tools                    │
-│                                                                  │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐            │
-│  │execute_fabric│ │run_fabric    │ │list_available│            │
-│  │    _task     │ │   _agent     │ │   _agents    │            │
-│  └──────┬───────┘ └──────┬───────┘ └──────────────┘            │
-│                                                                  │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐            │
-│  │search_fabric │ │get_agent     │ │update_agent  │            │
-│  │    _docs     │ │ _knowledge   │ │ _knowledge   │            │
-│  └──────────────┘ └──────────────┘ └──────────────┘            │
-│                                                                  │
-│  ┌──────────────┐ ┌──────────────┐                              │
-│  │visualize     │ │get_system    │                              │
-│  │  _workflow   │ │   _status    │                              │
-│  └──────────────┘ └──────────────┘                              │
-└─────────┬───────────────────────────────────────────────────────┘
-          │
-          ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                    Orchestrator 🧠                                │
-│               (Keyword-Based Intelligent Routing)                 │
-│                                                                   │
-│  ┌────────────────────┐  ┌────────────────────┐                  │
-│  │ Keyword Planner    │  │ AgentRegistry      │                  │
-│  │ Prompt → detect    │  │ Auto-Discovery     │                  │
-│  │ agents + operation │  │ 40 agents scanned  │                  │
-│  └────────┬───────────┘  └────────┬───────────┘                  │
-│           │                       │                               │
-│  ┌────────▼───────────────────────▼───────────┐                  │
-│  │         Execution Engine                    │                  │
-│  │  plan → execute → auto-learn → visualize   │                  │
-│  └────────┬───────────────────────────────────┘                  │
-└───────────┼──────────────────────────────────────────────────────┘
-            │ Dispatches to agents
-            ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                    Agent Layer (40 agents)                        │
-│                                                                   │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌────────────┐│
-│  │ lakehouse-  │ │ notebook-   │ │ pipeline-   │ │data-model- ││
-│  │ agent/      │ │ agent/      │ │ agent/      │ │ing-agent/  ││
-│  │ ├─agent.py  │ │ ├─agent.py  │ │ ├─agent.py  │ │├─agent.py  ││
-│  │ ├─instruct… │ │ ├─instruct… │ │ ├─instruct… │ │├─instruct… ││
-│  │ ├─examples  │ │ ├─examples  │ │ ├─examples  │ │├─examples  ││
-│  │ └─known_i…  │ │ └─known_i…  │ │ └─known_i…  │ │└─known_i…  ││
-│  └──────┬──────┘ └──────┬──────┘ └──────┬──────┘ └─────┬──────┘│
-└─────────┼───────────────┼───────────────┼───────────────┼───────┘
-          │               │               │               │
-          ▼               ▼               ▼               ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                        FabricCLI Wrapper                         │
-│              subprocess → `fab <noun> <verb> ...`                │
-│           dry-run · retry · timeout · JSON parsing               │
-└──────────────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                   Microsoft Fabric Platform                       │
-│        REST APIs · CLI · Workspaces · Capacities · Items         │
-└──────────────────────────────────────────────────────────────────┘
+Core behavior:
+- Natural-language request → orchestrator planning/routing
+- REST-first execution (`FabricRestClient`) with CLI fallback (`fab`)
+- Dependency-aware multi-step runs with parallel execution for independent tiers
+- Agent knowledge loop (`instructions.md`, `examples.md`, `known_issues.md`)
+
+---
+
+## 2) High-level runtime flow
+
+```text
+GitHub Copilot Chat
+  → MCP Server (mcp_server.py)
+  → Orchestrator (fabric_mas/core/orchestrator.py)
+  → Agent Registry + Agent Instances
+  → REST / CLI execution
+  → Telemetry + workflow visual output
 ```
 
 ---
 
-## Key Architecture Decision: Copilot IS the LLM
+## 3) MCP tools (current)
 
-Previous versions used OpenAI GPT-4o as an internal LLM planner. The current architecture
-eliminates this dependency:
-
-| Aspect | Old (OpenAI) | New (Copilot-Native) |
-|--------|-------------|---------------------|
-| LLM | GPT-4o via API | GitHub Copilot via VS Code |
-| API Key | `OPENAI_API_KEY` required | No API key needed |
-| Planning | LLM parses prompt → JSON plan | Keyword routing + Copilot NLU |
-| Cost | Per-token OpenAI billing | Included in Copilot licence |
-| Dependencies | langchain-openai, openai | None (removed) |
-| Architecture | MCP → Orchestrator → LLM → Plan → Execute | Copilot → MCP → Route → Execute |
-
-**Why this works:** Copilot already understands natural language. It reads the MCP tool
-descriptions, understands the user's intent, and calls the right tool with the right
-parameters. The keyword planner in the orchestrator provides fallback routing for
-`execute_fabric_task`, while `run_fabric_agent` lets Copilot bypass the planner entirely.
+`mcp_server.py` exposes **9 tools**:
+1. `execute_fabric_task`
+2. `run_fabric_agent`
+3. `list_available_agents`
+4. `search_fabric_docs`
+5. `get_agent_knowledge`
+6. `update_agent_knowledge`
+7. `visualize_workflow`
+8. `get_system_status`
+9. `check_naming_convention`
 
 ---
 
-## Component Breakdown
+## 4) Agent landscape (current)
 
-### 1. MCP Server (`mcp_server.py`)
+The system auto-discovers agent implementations from `fabric_mas/agents/*-agent/agent.py`.
 
-| Tool | Purpose |
-|------|---------|
-| `execute_fabric_task` | Main entry — natural language prompt → plan → execute |
-| `run_fabric_agent` | Direct agent call — agent_key + operation + params |
-| `list_available_agents` | Discovery — returns all 40 agents |
-| `search_fabric_docs` | Search Fabric API/CLI documentation |
-| `get_agent_knowledge` | Read an agent's knowledge files |
-| `update_agent_knowledge` | Update agent instructions/examples/issues |
-| `visualize_workflow` | Preview workflow without executing |
-| `get_system_status` | System health and configuration |
+Current roster: **29 agents**
 
-### 2. Orchestrator (`fabric_mas/core/orchestrator.py`)
+### Data Engineering
+- onelake
+- lakehouse
+- shortcut
+- notebook
+- spark_job_definition
 
-The **Master Brain** — now without LLM dependency:
-- **Keyword Planner**: Detects agents and operations from prompt text using weighted keyword matching
-- **JSON Plan Parser**: Accepts structured plans directly from Copilot
-- **AgentRegistry**: Auto-discovers agents by scanning `agents/*/agent.py`
-- **Direct Execution**: `execute_agent_directly()` for granular MCP tool calls
-- **Execution Engine**: Iterates plan steps, dispatches to agents, logs results
-- **Auto-Learning**: Logs to both agent and orchestrator `examples.md`
+### Data Integration
+- data_pipeline
+- copy_job
+- azure_data_factory
 
-### 3. Base Agent (`fabric_mas/core/base_agent.py`)
+### Analytics
+- warehouse
+- sql_endpoint
+- sql_database
+- mirrored_database
 
-Abstract base class providing:
-- **5 Canonical Operations**: `create`, `update`, `delete`, `analyze`, `deploy`
-- **AgentKnowledge**: Auto-loads `.md` files from the agent's folder
-- **Auto-Train**: Fetches latest API specs via SearchTool
-- **Prompt Memory**: `log_prompt()` auto-appends results to `examples.md`
-- **CLI Helper**: Builds and runs `fab` commands via `FabricCLI`
+### Real-Time
+- kql_queryset
+- data_activator
 
-### 4. Agent Knowledge System
+### Governance & Administration
+- workspace
+- capacity
+- deployment_pipeline
+- git_integration
+- lineage
+- monitoring
+- variable_library
+- security
 
-| File | Purpose | Update Mode |
-|------|---------|-------------|
-| `instructions.md` | Agent behaviour rules, API references | Manual / MCP tool |
-| `examples.md` | Few-shot examples + auto-logged history | **Manual + Auto** |
-| `known_issues.md` | Bugs, workarounds, gotchas | Manual / MCP tool |
+### AI & Advanced
+- data_agent
+- copilot
+- graphql_api
+- user_data_functions
+- data_wrangler
 
-### 5. Data Modeling Agent (New)
-
-Specialized agent for dimensional modeling:
-- Generates star/snowflake schema models
-- Applies SCD Type 1, 2, 3
-- Outputs SQL DDL, TMDL, or JSON
-- **Updateable guidelines** via `update_agent_knowledge` MCP tool
-- Does not execute CLI commands — generates artifacts
+### Modeling + Meta
+- data_modeling
+- orchestrator
 
 ---
 
-## Agent Categories (40 Total)
+## 5) Orchestration model
 
-| Category | Count | Agents |
-|----------|-------|--------|
-| **Data Engineering** | 5 | onelake, lakehouse, shortcut, notebook, spark-job |
-| **Data Integration** | 4 | data-pipeline, dataflow, copy-job, adf |
-| **Analytics & Warehousing** | 4 | warehouse, sql-endpoint, sql-database, mirrored-db |
-| **Real-Time Intelligence** | 3 | kql-queryset, data-activator, reflex |
-| **Reporting & Power BI** | 5 | semantic-model, report, dashboard, powerbi-app, map-visual |
-| **Governance & Admin** | 10 | workspace, capacity, domain, deployment-pipeline, git-integration, lineage, monitoring, variable-library, task-flow, security |
-| **AI & Advanced** | 7 | data-agent, copilot, graphql-api, udf, ai-functions, ontology, data-wrangler |
-| **Data Modeling** | 1 | data-modeling (star/snowflake schema, SCD, naming conventions) |
-| **Meta** | 1 | orchestrator (Master Brain) |
+### Planning priority
+1. Direct execution (`run_fabric_agent`) when agent + operation are explicit
+2. Structured plan execution (`plan_from_json` path)
+3. Natural-language orchestration (`execute_fabric_task`) as fallback
 
----
+### Dependency tiers
+Execution is tiered with parallelism inside each tier:
+- Tier 0: workspaces
+- Tier 1: lakehouses
+- Tier 2: notebooks / pipelines
+- Tier 3: warehouses
+- Tier 4: git integration
 
-## Data Flow
-
-```
-User types in Copilot Chat:
-"Create Bronze lakehouse and ETL notebook in workspace ws-123"
-    │
-    ▼
-┌─ GitHub Copilot ──────────────────────────────┐
-│  Reads MCP tool descriptions                   │
-│  Decides: call execute_fabric_task             │
-│  Passes prompt as argument                     │
-└───────────────┬───────────────────────────────┘
-                │
-                ▼
-┌─ Orchestrator.plan() ─────────────────────────┐
-│  Keyword detection:                            │
-│  • "lakehouse" → lakehouse agent               │
-│  • "notebook" → notebook agent                 │
-│  • "create" → create operation                 │
-│  • "ws-123" → workspace_id parameter           │
-│                                                │
-│  Plan: [lakehouse.create, notebook.create]     │
-└───────────────┬───────────────────────────────┘
-                │
-                ▼
-┌─ Orchestrator.execute_plan() ─────────────────┐
-│  Step 1: LakehouseAgent.create(params)         │
-│    → fab lakehouse create --display-name Bronze│
-│    → log_prompt() → examples.md                │
-│                                                │
-│  Step 2: NotebookAgent.create(params)          │
-│    → fab notebook create --display-name ETL    │
-│    → log_prompt() → examples.md                │
-└───────────────┬───────────────────────────────┘
-                │
-                ▼
-┌─ Response back to Copilot ────────────────────┐
-│  { success: true,                              │
-│    message: "Executed 2 steps — all succeeded",│
-│    plan: {...}, results: [{...}, {...}] }      │
-└────────────────────────────────────────────────┘
-```
+If any step in a tier fails, subsequent tiers stop.
 
 ---
 
-## Auto-Learning Architecture
+## 6) Knowledge and learning system
 
-```
-            Execution happens
-                    │
-            ┌───────┼───────┐
-            ▼       ▼       ▼
-    Agent A's   Agent B's  Orchestrator's
-    examples.md examples.md examples.md
-            │       │       │
-            └───────┼───────┘
-                    │
-              Loaded at next
-              startup into
-              AgentKnowledge
-                    │
-                    ▼
-              Keyword planner
-              gets richer context
-              for future routing
-```
+Each agent maintains:
+- `instructions.md` (behavior and guidance)
+- `examples.md` (examples + execution memory)
+- `known_issues.md` (workarounds and recurring failures)
+
+The orchestrator and agents leverage this for smarter repeated execution and safer retries.
 
 ---
 
-## File Structure
+## 7) Prompt and documentation governance
 
-```
+### Canonical prompt file policy
+- Keep exactly **one** top-level prompt catalogue file: `SAMPLE_PROMPTS.md`
+- `MASTER_PROMPT.md` is deprecated and removed from active documentation flow
+
+`SAMPLE_PROMPTS.md` must include:
+- small scenarios (single-agent)
+- medium scenarios (multi-agent)
+- complex end-to-end scenarios
+- audit/validation prompts
+
+### Architecture update policy (mandatory)
+Whenever architecture changes, update this file in the same PR/commit for any of:
+- MCP tool additions/removals
+- agent roster changes
+- routing/dependency/parallel execution behavior changes
+- telemetry/visualization behavior changes
+- repository structure changes affecting execution paths
+
+Recommended checklist for architecture changes:
+1. Update `ARCHITECTURE.md`
+2. Update `HOW_TO_USE.md`
+3. Update `SAMPLE_PROMPTS.md` (if user-facing behavior changed)
+4. Run smoke audit (imports + agent registration + docs consistency grep)
+
+---
+
+## 8) Repository map (critical files)
+
+```text
 FABRIC-MAS/
-├── mcp_server.py              # FastMCP server — 8 tools
-├── setup_wizard.py            # One-prompt setup script
-├── requirements.txt           # Dependencies (no OpenAI!)
-├── .env.example               # Environment template
-├── .gitignore                 # Git ignore rules
-├── ARCHITECTURE.md            # This file
-├── HOW_TO_USE.md              # Setup & usage guide
-├── SAMPLE_PROMPTS.md          # Prompt catalogue
-├── MASTER_PROMPT.md           # Regeneration prompt
-├── GITHUB_DEPLOYMENT.md       # GitHub deployment guide
-│
-├── .vscode/
-│   └── mcp.json               # MCP server configuration
-│
-├── fabric_mas/
-│   ├── core/
-│   │   ├── base_agent.py      # BaseAgent ABC + AgentKnowledge
-│   │   ├── orchestrator.py    # Keyword planner + AgentRegistry
-│   │   └── cli_wrapper.py     # FabricCLI subprocess wrapper
-│   │
-│   ├── tools/
-│   │   ├── search_tool.py     # Tavily/Bing auto-train search
-│   │   └── workflow_visualizer.py  # Rich + HTML workflow renderer
-│   │
-│   └── agents/                # 40 agent folders
-│       ├── lakehouse-agent/
-│       ├── data-modeling-agent/  # NEW: Dimensional modeling
-│       ├── orchestrator-agent/
-│       └── ... (39 total)
-│
-└── workflow_output/           # Auto-generated HTML workflows
+├── mcp_server.py
+├── mas_log_server.py
+├── setup_wizard.py
+├── ARCHITECTURE.md
+├── HOW_TO_USE.md
+├── SAMPLE_PROMPTS.md
+├── MEMORY.md
+├── requirements.txt
+└── fabric_mas/
+    ├── core/
+    │   ├── orchestrator.py
+    │   ├── base_agent.py
+    │   ├── cli_wrapper.py
+    │   └── fabric_rest_client.py
+    ├── agents/
+    └── tools/
 ```
+
+---
+
+## 9) Current design principles
+
+- Keep orchestration deterministic and dependency-safe
+- Prefer REST to reduce CLI fragility
+- Keep prompt surface simple and user-oriented
+- Keep agent knowledge local, explicit, and append-only for operational history
+- Keep docs synchronized with architecture as a release gate

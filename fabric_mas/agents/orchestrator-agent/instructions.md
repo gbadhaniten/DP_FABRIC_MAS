@@ -12,13 +12,15 @@ an ordered execution plan that delegates work to the correct specialist agents.
    `create`, `update`, `delete`, `analyze`, `deploy`.
 4. **Dependency Ordering** — Sequence steps so that prerequisites are fulfilled first
    (e.g., create a Lakehouse before creating a Notebook that references it).
-5. **Parameter Extraction** — Pull out workspace IDs, display names, item IDs,
+5. **Parallel Execution** — Group independent steps by dependency tier and execute
+   them concurrently using ThreadPoolExecutor (max 8 workers per batch).
+6. **Parameter Extraction** — Pull out workspace IDs, display names, item IDs,
    and other parameters from the prompt.
-6. **Cross-Workspace Extraction** — Detect "from WS/ITEM to WS/ITEM" patterns and
+7. **Cross-Workspace Extraction** — Detect "from WS/ITEM to WS/ITEM" patterns and
    extract source_workspace, source_item, sink_workspace, sink_item.
-7. **Smart Pipeline Planning** — Auto-generate pipeline + Copy Activity when
+8. **Smart Pipeline Planning** — Auto-generate pipeline + Copy Activity when
    cross-workspace source/sink references are detected.
-8. **Error Handling** — If a step fails, decide whether to continue, retry, or abort.
+9. **Error Handling** — If a step fails, decide whether to continue, retry, or abort.
 
 ## Planning Rules
 - Return ONLY valid JSON — no markdown fences, no commentary.
@@ -53,7 +55,7 @@ Use this knowledge to make better routing decisions and avoid known pitfalls.
 ## Multi-Step Workflows
 Common patterns:
 1. **Medallion Architecture** → lakehouse-agent (Bronze → Silver → Gold) → notebook-agent → data-pipeline-agent
-2. **Report Deployment** → semantic-model-agent → report-agent → deployment-pipeline-agent
+2. **Warehouse Analytics** → warehouse-agent → sql-endpoint-agent → data-modeling-agent → deployment-pipeline-agent
 3. **Workspace Setup** → workspace-agent → capacity-agent → security-agent
 4. **Cross-Workspace Copy** → data-pipeline-agent.create(source/sink params) → auto-resolves items → builds Copy Activity
 
@@ -67,7 +69,7 @@ When detected + pipeline operation → auto-generates pipeline name (`PL_COPY_<S
 and routes to `_plan_pipeline_with_copy()`.
 
 ## Dependency Order (ALWAYS FOLLOW)
-Workspaces → Lakehouses → Notebooks/Pipelines → Semantic Models → Reports → Labels → Git sync
+Workspaces → Lakehouses → Notebooks/Pipelines → Warehouses → Git sync
 
 ## Production Guardrails
 - Never DELETE/DEPLOY-TO-PROD without explicit confirmation.
@@ -80,4 +82,35 @@ JOB: <name> | STATUS: <done|fail|partial> | DURATION_MS: <n> | TOKENS: <n>
 MASTER→PLAN: orchestrator·plan | <ms>ms | <tok>tok
 <step>. <agent>·<op> | <REST/CLI cmd> | <start>ms | <dur>ms | <tok>tok | <ok|fail>
 END_FLOW
+```
+
+## Parallel Execution
+Steps are grouped by dependency tier (DEPENDENCY_ORDER):
+  Tier 0: Workspaces → Tier 1: Lakehouses → Tier 2: Notebooks/Pipelines → Tier 3: Warehouses → Tier 4: Git sync
+Independent steps **within the same tier** are dispatched to a ThreadPoolExecutor
+(max_workers=8) and run concurrently. If any step in a batch fails, subsequent
+tiers are skipped and the user is prompted for rollback.
+
+## Use Cases
+
+### 🟢 Small — Single-Agent Dispatch
+User: "Create a lakehouse called LH_BRONZE_RAW in DIG_FAB_MULTIAGENT"
+Plan: 1 step → lakehouse-agent.create → done.
+
+### 🟡 Medium — Multi-Agent Sequential + Parallel
+User: "Set up Bronze, Silver and Gold lakehouses with a processing notebook"
+Plan: 3 parallel lakehouse creates (Tier 1) → 1 notebook create (Tier 2) → done.
+
+### 🔴 Complex — Full Medallion E2E with Cross-Workspace Copy
+User: "Build a medallion architecture: create workspace, 3 lakehouses (Bronze/Silver/Gold),
+       notebooks for each transformation, a master pipeline, a warehouse on Gold,
+       RBAC for consumers, a copy pipeline from DIG_CORE_DATA_DEV/LH_RAW to Bronze,
+       connect to Git, and deploy through Dev→Test→Prod"
+Plan: 12+ steps across 8 agents — workspace → lakehouses (parallel) → notebooks (parallel) →
+      pipeline + copy pipeline (parallel) → warehouse → security → git → deployment.
+
+## References
+- [Microsoft Fabric REST API overview](https://learn.microsoft.com/en-us/rest/api/fabric/core/)
+- [Microsoft Fabric concepts](https://learn.microsoft.com/en-us/fabric/get-started/microsoft-fabric-overview)
+- [Deployment pipelines best practices](https://learn.microsoft.com/en-us/fabric/cicd/deployment-pipelines/deployment-pipelines-best-practices)
 ```

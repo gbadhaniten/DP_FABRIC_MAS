@@ -111,3 +111,39 @@ Use the update_agent_knowledge MCP tool:
 
 This allows your team to encode organizational standards (naming conventions,
 SCD preferences, approved patterns) directly into the agent's behavior.
+
+## Use Cases
+
+### 🟢 Small — Single Fact Table DDL
+Generate a single fact table DDL.
+```
+User: "Generate DDL for a Fact_Sales table"
+Action: generate_model with target table Fact_Sales
+```
+
+### 🟡 Medium — Star Schema with SCD Type 2
+Generate star schema with SCD Type 2 dimensions for a business domain.
+```
+User: "Generate a star schema for customer analytics with SCD Type 2 on Dim_Customer"
+Action:
+  1. Generate Fact_Customer_Orders with grain = one row per order
+  2. Generate Dim_Customer with SCD Type 2 (effective_date, expiry_date, is_current)
+  3. Generate Dim_Product, Dim_Date, Dim_Geography
+  4. Output DDL with surrogate keys and relationships
+```
+
+### 🔴 Complex — Enterprise Data Model
+Full enterprise data model: star schema + snowflake, multiple subject areas, SCD Type 1/2/3, TMDL output, with naming conventions.
+```
+User: "Build an enterprise data model for Sales, Inventory, and Finance"
+Action:
+  1. Generate star schemas for each subject area (Sales, Inventory, Finance)
+  2. Apply SCD Type 1 (corrections), Type 2 (history), Type 3 (limited history) per dimension
+  3. Create conformed dimensions shared across subject areas
+  4. Generate SQL DDL for Warehouse deployment
+  5. Generate TMDL for Semantic Model
+  6. Enforce naming conventions and design checklist validation
+```
+
+## References
+- [Dimensional Modeling in Fabric](https://learn.microsoft.com/en-us/fabric/data-warehouse/dimensional-modeling)

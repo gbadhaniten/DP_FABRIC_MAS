@@ -7,7 +7,7 @@ across all Fabric item types in a workspace.
 Capabilities:
 - List recent job runs (succeeded, failed, in-progress) for any workspace
 - Get failed jobs with error details for triage
-- Get item refresh history (semantic models, dataflows, pipelines)
+- Get item refresh history (pipelines, notebooks, lakehouses)
 - Get capacity utilisation and throttling status
 - Workspace health summary (item counts, last-run timestamps, failures)
 - On-demand item run (trigger pipeline / notebook / dataflow refresh)
@@ -166,7 +166,7 @@ class MonitoringAgent(BaseAgent):
             mode="job_history"       → List recent job runs for an item
             mode="failed_jobs"       → List failed jobs in a workspace
             mode="workspace_health"  → Workspace health summary
-            mode="refresh_history"   → Refresh history for semantic model / dataflow
+            mode="refresh_history"   → Refresh history for pipeline / notebook / lakehouse
             mode="capacity"          → Capacity utilisation info
 
         Default: workspace_health if no item_id, job_history if item_id given.

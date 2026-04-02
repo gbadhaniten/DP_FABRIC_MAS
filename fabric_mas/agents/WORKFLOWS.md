@@ -39,7 +39,7 @@
 
 **Agent Sequence:**
 1. `workspace-agent` → create or validate workspace
-2. `lakehouse-agent` × 3 → create Bronze, Silver, Gold lakehouses
+2. `lakehouse-agent` × 3 → create Bronze, Silver, Gold lakehouses (⚡ parallel)
 3. `shortcut-agent` → create source data shortcut (ADLS, S3, etc.)
 4. `notebook-agent` × 2 → create ETL notebooks per layer
 5. `data-pipeline-agent` → create orchestration pipeline with schedule
@@ -58,10 +58,10 @@
          │                       │                       │
          └───────────┬───────────┘───────────┬───────────┘
                      ▼                       ▼
-         ┌──────────────────┐    ┌──────────────────┐
-         │ capacity-agent    │    │ domain-agent      │
-         │ Assign F64        │    │ Create domain     │
-         └────────┬─────────┘    └────────┬─────────┘
+         ┌──────────────────┐
+         │ capacity-agent    │
+         │ Assign F64        │
+         └────────┬─────────┘
                   ▼                       ▼
          ┌──────────────────┐
          │ security-agent    │
@@ -78,33 +78,32 @@
 ```
 
 **Agent Sequence:**
-1. `workspace-agent` × 3 → create Dev, Test, Prod workspaces
+1. `workspace-agent` × 3 → create Dev, Test, Prod workspaces (parallel)
 2. `capacity-agent` → assign capacity to production
-3. `domain-agent` → create business domain and assign workspaces
-4. `security-agent` → configure RBAC roles per workspace
-5. `git-integration-agent` → connect workspace to git repository
-6. `deployment-pipeline-agent` → create CI/CD pipeline across stages
+3. `security-agent` → configure RBAC roles per workspace
+4. `git-integration-agent` → connect workspace to git repository
+5. `deployment-pipeline-agent` → create CI/CD pipeline across stages
 
 ---
 
-## 3. Power BI Report Deployment
+## 3. Data Warehouse Analytics
 
-**Goal:** Build and deploy analytics reports from a semantic model.
+**Goal:** Build a warehouse with SQL analytics and deploy through environments.
 
 ```
 ┌──────────────────┐
-│ semantic-model-   │ ──▶ CREATE model from Gold lakehouse / warehouse
-│ agent             │
+│ warehouse-agent   │ ──▶ CREATE warehouse from Gold lakehouse
 └────────┬─────────┘
          ▼
 ┌──────────────────┐
-│ report-agent      │ ──▶ CREATE Power BI report with visuals
+│ sql-endpoint-     │ ──▶ CONFIGURE SQL endpoint for read access
+│ agent             │
 └────────┬─────────┘
          ▼
 ┌──────────────────┐    ┌──────────────────┐
-│ dashboard-agent   │    │ powerbi-app-agent │
-│ Pin key visuals   │    │ Publish app to    │
-│ to dashboard      │    │ target audience   │
+│ data-modeling-    │    │ security-agent    │
+│ agent             │    │ Configure RBAC    │
+│ Star schema       │    │ for warehouse     │
 └────────┬─────────┘    └────────┬─────────┘
          │                       │
          ▼                       ▼
@@ -115,10 +114,10 @@
 ```
 
 **Agent Sequence:**
-1. `semantic-model-agent` → create or update semantic model with DAX measures
-2. `report-agent` → create Power BI report over the model
-3. `dashboard-agent` → pin key visuals to an executive dashboard
-4. `powerbi-app-agent` → publish app to business users
+1. `warehouse-agent` → create warehouse and load data from Gold lakehouse
+2. `sql-endpoint-agent` → configure SQL endpoint for downstream access
+3. `data-modeling-agent` → generate star schema in warehouse
+4. `security-agent` → assign RBAC roles for warehouse consumers
 5. `deployment-pipeline-agent` → promote through Dev → Test → Prod
 
 ---
@@ -140,13 +139,13 @@
 │ Data lands in Bronze lakehouse            │
 └────────┬─────────────────────────────────┘
          ▼
-┌──────────────────┐    ┌──────────────────┐
-│ dataflow-agent    │    │ notebook-agent    │
-│ Dataflow Gen2     │    │ PySpark cleansing │
-│ cleansing         │    │ notebook          │
-└────────┬─────────┘    └────────┬─────────┘
-         │                       │
-         ▼                       ▼
+┌──────────────────┐
+│ notebook-agent    │
+│ PySpark cleansing │
+│ & transformation  │
+└────────┬─────────┘
+         │
+         ▼
 ┌──────────────────────────────────────────┐
 │ data-pipeline-agent                       │
 │ Orchestrate: Copy → Transform → Load      │
@@ -156,7 +155,7 @@
 **Agent Sequence:**
 1. `copy-job-agent` / `mirrored-db-agent` → ingest from external sources
 2. `lakehouse-agent` → raw data lands in Bronze
-3. `dataflow-agent` / `notebook-agent` → transform and cleanse
+3. `notebook-agent` → transform and cleanse with PySpark
 4. `data-pipeline-agent` → orchestrate the full ETL flow
 
 ---
@@ -171,24 +170,16 @@
 └────────┬─────────┘
          ▼
 ┌──────────────────┐    ┌──────────────────┐
-│ data-agent-agent  │    │ ai-functions-     │
-│ Natural language   │    │ agent             │
-│ query interface   │    │ ML model serving   │
-└────────┬─────────┘    └────────┬─────────┘
-         │                       │
-         ▼                       ▼
-┌──────────────────┐
-│ copilot-agent     │
-│ Enable Copilot    │
-│ for workspace     │
-└──────────────────┘
+│ data-agent-agent  │    │ copilot-agent     │
+│ Natural language   │    │ Enable Copilot    │
+│ query interface   │    │ for workspace     │
+└──────────────────┘    └──────────────────┘
 ```
 
 **Agent Sequence:**
 1. `graphql-api-agent` → create API layer over data
 2. `data-agent-agent` → create natural-language query agent
-3. `ai-functions-agent` → deploy ML model functions
-4. `copilot-agent` → enable Copilot features
+3. `copilot-agent` → enable Copilot features
 
 ---
 

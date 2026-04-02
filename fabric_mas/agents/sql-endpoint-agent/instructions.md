@@ -27,3 +27,39 @@ fab sql-endpoint delete --sql-endpoint-id "<guid>" --workspace-id "<guid>"
 3. Consult `known_issues.md` before executing — check for active workarounds.
 4. If autotrain returns new API info, prefer it over cached knowledge.
 5. Log every CLI command before execution for audit trail.
+
+## Use Cases
+
+### 🟢 Small — List SQL Endpoints
+List SQL endpoints for lakehouses.
+```
+User: "List all SQL endpoints in the workspace"
+Action: list SQL analytics endpoints
+```
+
+### 🟡 Medium — Analyze Endpoint Performance
+Analyze SQL endpoint performance and query patterns.
+```
+User: "Analyze the performance of SQL endpoints in the analytics workspace"
+Action:
+  1. List all SQL endpoints in the workspace
+  2. Gather query execution statistics and patterns
+  3. Identify slow-running queries and bottlenecks
+  4. Recommend optimization strategies (indexing, caching)
+```
+
+### 🔴 Complex — Cross-Workspace Endpoint Optimization
+Optimize SQL endpoint configuration across workspace for reporting workloads.
+```
+User: "Optimize SQL endpoints across all workspaces for reporting"
+Action:
+  1. sql-endpoint-agent → audit all SQL endpoints across workspaces
+  2. Analyze query patterns and workload distribution
+  3. Recommend endpoint configurations for reporting vs. ad-hoc use
+  4. capacity-agent → verify capacity allocation supports reporting load
+  5. monitoring-agent → set up endpoint performance monitoring
+  6. Generate optimization report with before/after recommendations
+```
+
+## References
+- [Lakehouse SQL Analytics Endpoint](https://learn.microsoft.com/en-us/fabric/data-engineering/lakehouse-sql-analytics-endpoint)
